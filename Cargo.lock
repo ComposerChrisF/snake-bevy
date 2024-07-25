@@ -3501,7 +3501,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "snake_bevy"
+name = "snake-bevy"
 version = "0.1.0"
 dependencies = [
  "bevy",

@@ -17,12 +17,12 @@ on:
 # Configure constants for this workflow.
 env:
   # The base filename of the binary produced by `cargo build`.
-  BINARY: snake_bevy
+  BINARY: snake-bevy
   # The name to use for the packaged application produced by this workflow.
-  PACKAGE_NAME: snake_bevy
+  PACKAGE_NAME: snake-bevy
   # The itch.io page to upload to, in the format: `user-name/project-name`.
   # Comment this out to disable.
-  ITCH_TARGET: ComposerChris/snake_bevy
+  ITCH_TARGET: ComposerChris/snake-bevy
   # The organization or author that owns the rights to the game.
   OWNER: ComposerChris
   # The path to the assets directory.

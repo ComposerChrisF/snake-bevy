@@ -3,6 +3,7 @@ mod dev_tools;
 mod game;
 mod screen;
 mod ui;
+mod snake_game;
 
 use bevy::{
     asset::AssetMetaCheck,
@@ -14,6 +15,8 @@ pub struct AppPlugin;
 
 impl Plugin for AppPlugin {
     fn build(&self, app: &mut App) {
+        let _g = snake_game::SnakeGame::new();
+
         // Order new `AppStep` variants by adding them here:
         app.configure_sets(
             Update,

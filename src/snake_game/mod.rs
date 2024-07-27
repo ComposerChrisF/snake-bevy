@@ -41,6 +41,7 @@ impl Grid {
             Self::set_cell(cells, 0, y, CellKind::Wall);
             Self::set_cell(cells, Self::WIDTH - 1, y, CellKind::Wall);
         }
+        //TESTING: Self::set_cell(cells, 0, 0, CellKind::Crash);        // So we can see where origin is
     }
     fn set_cell(cells: &mut [Cell], x: i16, y: i16, kind: CellKind) {
         if x < 0 || y < 0 || x >= Self::WIDTH || y >= Self::HEIGHT { return; }
@@ -81,6 +82,7 @@ pub enum CellKind {
     Empty,
     Apple,
     Snake,
+    SnakeHead,
     Wall,
     Crash,
 }
@@ -100,20 +102,23 @@ pub enum Direction {
 
 impl Direction {
     pub fn random() -> Direction {
-        match rand::thread_rng().gen_range(0..3) {
+        Self::from_index(rand::thread_rng().gen_range(0..3))
+    }
+
+    pub fn from_index(i: usize) -> Direction {
+        match i {
             0 => Direction::North,
             1 => Direction::East,
             2 => Direction::South,
             3 => Direction::West,
-            _ => panic!("Bad range for gen_range() in Direction::random()"),
+            _ => panic!("Bad i in from_index()"),
         }
     }
-
     pub fn to_point(self) -> Point {
         match self {
-            Direction::North => Point { x: 0, y: -1, },
+            Direction::North => Point { x: 0, y: 1, },
             Direction::East  => Point { x: 1, y: 0, },
-            Direction::South => Point { x: 0, y: 1, },
+            Direction::South => Point { x: 0, y: -1, },
             Direction::West => Point { x: -1, y: 0, },
         }
     }
@@ -172,10 +177,10 @@ impl Snake {
             let offset = dir.to_point();
             let tail = head.add(offset);
             if grid.get_cell(tail).kind != CellKind::Empty { continue; }
-            grid.get_cell_mut(head).kind = CellKind::Snake;
+            grid.get_cell_mut(head).kind = CellKind::SnakeHead;
             grid.get_cell_mut(tail).kind = CellKind::Snake;
-            self.locations.push_back(tail);
-            self.locations.push_back(head);
+            self.locations.push_front(tail);
+            self.locations.push_front(head);
             self.head_location = head;
             return;
         }
@@ -274,13 +279,19 @@ impl SnakeGame {
     /// result of calling `move_snake()`, and informs the caller what needs to change in their
     /// visualization.
     pub fn move_snake(&mut self, direction: Direction, new_apple_location: Option<Point>) {
+        //info!("move_snake({direction:#?}, {new_apple_location:#?}); snake.to_grow={}; GameState={:?}", self.snake.to_grow, self.state);
         self.grid_changes.clear();
         if self.state != GameState::Running { return; }
         self.playback_events.push(PlaybackEvents::MoveSnake(direction));
         let offset = direction.to_point();
         let new_location = self.snake.head_location.add(offset);
+        let old_head_cell = self.grid.get_cell_mut(self.snake.head_location);
+        old_head_cell.kind = CellKind::Snake;
+        self.grid_changes.push(self.snake.head_location);
         let new_cell = self.grid.get_cell_mut(new_location);
         let kind_hit = new_cell.kind;
+        new_cell.kind = CellKind::SnakeHead;
+        self.grid_changes.push(new_location);
         match kind_hit {
             CellKind::Apple => {
                 new_cell.kind = CellKind::Snake;
@@ -295,11 +306,8 @@ impl SnakeGame {
                 self.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
                 self.snake.to_grow += Self::GROW_INCREMENT;
             }
-            CellKind::Empty => {
-                new_cell.kind = CellKind::Snake;
-                self.grid_changes.push(new_location);
-                    }
-            CellKind::Snake | CellKind::Wall | CellKind::Crash => {
+            CellKind::Empty => {}
+            CellKind::Snake | CellKind::SnakeHead | CellKind::Wall | CellKind::Crash => {
                 self.playback_events.push(PlaybackEvents::GameOver);
                 self.state = GameState::GameOver;
                 new_cell.kind = CellKind::Crash;
@@ -309,7 +317,7 @@ impl SnakeGame {
         if self.snake.to_grow == 0 {
             // Snake keeps same size, so we pop off the tail, then push the new head to simulate
             // movement
-            let old_tail_location = self.snake.locations.pop_front().unwrap();
+            let old_tail_location = self.snake.locations.pop_back().unwrap();
             let old_tail_cell = self.grid.get_cell_mut(old_tail_location);
             old_tail_cell.kind = CellKind::Empty;
             self.grid_changes.push(old_tail_location);
@@ -317,6 +325,7 @@ impl SnakeGame {
             self.snake.to_grow -= 1;
         };
         self.snake.locations.push_front(new_location);
+        self.snake.head_location = new_location;
     }
 
     pub fn wall_and_body_distances(&self) -> ([i16; 4], [i16; 4]) {
@@ -325,16 +334,16 @@ impl SnakeGame {
         let head = self.snake.head_location;
         for dir in [Direction::North, Direction::East, Direction::South, Direction::West] {
             let i = dir.to_index();
-            dist_walls[i] = self.distance_to(head, dir, CellKind::Wall);
-            dist_snake[i] = self.distance_to(head, dir, CellKind::Snake);
+            dist_walls[i] = self.distance_to(head, dir, &[CellKind::Wall]);
+            dist_snake[i] = self.distance_to(head, dir, &[CellKind::Snake, CellKind::SnakeHead]);
         }
         (dist_walls, dist_snake)
     }
-    fn distance_to(&self, pt_start: Point, direction: Direction, target: CellKind) -> i16 {
+    fn distance_to(&self, pt_start: Point, direction: Direction, target: &[CellKind]) -> i16 {
         let offset = direction.to_point();
         let mut distance = 0;
         let mut pt_test = pt_start.add(offset);
-        while self.grid.is_in_bounds(pt_test) && self.grid.get_cell(pt_test).kind != target {
+        while self.grid.is_in_bounds(pt_test) && !target.contains(&self.grid.get_cell(pt_test).kind) {
             distance += 1;
             pt_test = pt_start.add(offset);
         }

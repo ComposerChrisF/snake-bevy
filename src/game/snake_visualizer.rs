@@ -24,19 +24,15 @@ use crate::AppSet;
 use super::spawn::level::SpawnLevel;
 
 
-#[derive(Reflect, Copy, Clone, PartialEq, Eq)]
+#[derive(Reflect, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Dir {
+    #[default]
     Up,
     Down,
     Left,
     Right,
 }
 
-impl Default for Dir {
-    fn default() -> Self {
-        Dir::Up
-    }
-}
 
 impl Dir {
     pub fn to_snake_direction(self) -> snake_game::Direction {
@@ -55,27 +51,35 @@ pub struct SnakeMovementController(Option<Dir>);
 
 fn record_movement_controller(
     input: Res<ButtonInput<KeyCode>>,
-    mut controller_query: Query<&mut SnakeMovementController>,
+    mut controller_query: Query<(&mut SnakeMovementController, &mut LastUpdate)>,
 ) {
     // Collect directional input.
     let mut intent = None;
+    let mut should_reset_timer = false;
     // FUTURE: Ignore reversing direction, since this always produces a crash
     if input.pressed(KeyCode::KeyW) || input.pressed(KeyCode::ArrowUp) {
         intent = Some(Dir::Up);
+        if input.just_pressed(KeyCode::KeyW) || input.just_pressed(KeyCode::ArrowUp) { should_reset_timer = true; }
     }
     if input.pressed(KeyCode::KeyS) || input.pressed(KeyCode::ArrowDown) {
         intent = Some(Dir::Down);
+        if input.just_pressed(KeyCode::KeyS) || input.just_pressed(KeyCode::ArrowDown) { should_reset_timer = true; }
     }
     if input.pressed(KeyCode::KeyA) || input.pressed(KeyCode::ArrowLeft) {
         intent = Some(Dir::Left);
+        if input.just_pressed(KeyCode::KeyA) || input.just_pressed(KeyCode::ArrowLeft) { should_reset_timer = true; }
     }
     if input.pressed(KeyCode::KeyD) || input.pressed(KeyCode::ArrowRight) {
         intent = Some(Dir::Right);
+        if input.just_pressed(KeyCode::KeyD) || input.just_pressed(KeyCode::ArrowRight) { should_reset_timer = true; }
     }
 
     // Apply movement intent to controllers.
-    for mut controller in &mut controller_query {
-        controller.0 = intent;
+    if intent.is_some() {
+        for (mut controller, mut last_update) in &mut controller_query {
+            controller.0 = intent;
+            if should_reset_timer { *last_update = LastUpdate(0.0); }
+        }
     }
 }
 
@@ -105,30 +109,19 @@ pub(super) fn plugin(app: &mut App) {
 fn tile_texture_index_of_cell_kind(kind: snake_game::CellKind) -> Option<u32> {
     match kind {
         snake_game::CellKind::Empty => None,
+        snake_game::CellKind::Crash => Some(0),
         snake_game::CellKind::Apple => Some(1),
         snake_game::CellKind::Wall => Some(2),
-        snake_game::CellKind::Snake => Some(3),
-        snake_game::CellKind::Crash => Some(0),
+        snake_game::CellKind::SnakeHead => Some(3),
+        snake_game::CellKind::Snake => Some(4),
     }
 }
 
-
-fn spawn_level(
-    _trigger: Trigger<SpawnLevel>,
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-) {
-    // Add the snake game as a resource
-    let mut snake_game = snake_game::SnakeGame::new(None);
-    let texture_handle: Handle<Image> = asset_server.load("images/tiles.png");
-    let map_size = TilemapSize { x: snake_game.grid.width as u32, y: snake_game.grid.height as u32 };
-    let mut tile_storage = TileStorage::empty(map_size);
-    let map_type = TilemapType::Square;
-    let tilemap_entity = commands.spawn_empty().id();
+fn copy_grid_into_tilemap(grid: &snake_game::Grid, tilemap_entity: Entity, tile_storage: &mut TileStorage, map_size: &TilemapSize, commands: &mut Commands) {
     for x in 0..map_size.x {
         for y in 0..map_size.y {
             let tile_pos = TilePos { x, y };
-            let cell = snake_game.grid.get_cell_mut(snake_game::Point { x: x as i16, y: y as i16 });
+            let cell = grid.get_cell(snake_game::Point { x: x as i16, y: y as i16 });
             let tile_texture_index = tile_texture_index_of_cell_kind(cell.kind);
             if let Some(tile_texture_index) = tile_texture_index {
                 let tile_entity = commands
@@ -143,6 +136,21 @@ fn spawn_level(
             };
         }
     }
+}
+
+fn spawn_level(
+    _trigger: Trigger<SpawnLevel>,
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+) {
+    let texture_handle: Handle<Image> = asset_server.load("images/tiles.png");
+    let snake_game = snake_game::SnakeGame::new(None);
+    // Add the snake game as a resource
+    let tilemap_entity = commands.spawn_empty().id();
+    let map_size = TilemapSize { x: snake_game.grid.width as u32, y: snake_game.grid.height as u32 };
+    let mut tile_storage = TileStorage::empty(map_size);
+    let map_type = TilemapType::Square;
+    copy_grid_into_tilemap(&snake_game.grid, tilemap_entity, &mut tile_storage, &map_size, &mut commands);
     let tile_pixel_size = TilemapTileSize { x: 16.0, y: 16.0 };
     let grid_size = tile_pixel_size.into();
     commands.entity(tilemap_entity).insert(
@@ -180,13 +188,13 @@ fn apply_movement(
 ) {
     for (mut my_snake_game, mut last_update, movement) in snake_query.iter_mut() {
         if let Some(dir) = movement.0 {
-            let current_time =time.elapsed_seconds_f64();
+            let current_time = time.elapsed_seconds_f64();
             if current_time - last_update.0 > 0.1 {
                 my_snake_game.0.move_snake(dir.to_snake_direction(), None);
                 let (tile_storage, tilemap_entity) = tilemap_query.get_single_mut().unwrap();
                 update_tilemap(&mut commands, &my_snake_game, tilemap_entity, tile_storage, &mut tile_texture_query);
+                last_update.0 = current_time;
             }
-            last_update.0 = current_time;
         }
     }
 }
@@ -200,12 +208,16 @@ fn update_tilemap(
     tile_texture_query: &mut Query<&mut TileTextureIndex>,
 ) {
     let snake_game = &my_snake_game.0;
+    //let map_size = TilemapSize { x: snake_game.grid.width as u32, y: snake_game.grid.height as u32 };
+    //copy_grid_into_tilemap(&snake_game.grid, tilemap_entity, &mut tile_storage, &map_size, commands);
+    
     for pt in &snake_game.grid_changes {
         let cell = snake_game.grid.get_cell(*pt);
-        let tile_position = TilePos { x: pt.x as u32, y: pt.x as u32 };
+        let tile_position = TilePos { x: pt.x as u32, y: pt.y as u32 };
         let tile = tile_storage.get(&tile_position);
+        //info!("grid_change: location={pt:#?}, CellKind={:#?}, tile found={tile:?}", cell.kind);
         match (cell.kind, tile) {
-            (snake_game::CellKind::Empty, None) => { /* Nothing to do. (Shouldn't happen.) */ }
+            (snake_game::CellKind::Empty, None) => { /* Nothing to do. (Shouldn't happen.) */ info!("BUG!"); }
             (snake_game::CellKind::Empty, Some(tile)) => { 
                 // Remove from Tilemap
                 tile_storage.remove(&tile_position);
@@ -227,8 +239,11 @@ fn update_tilemap(
             }
             (cell_kind, Some(tile)) => { 
                 // Change texture of tile already in Tilemap
-                let mut tile_texture_index = tile_texture_query.get_mut(tile).unwrap();
-                tile_texture_index.0 = tile_texture_index_of_cell_kind(cell_kind).unwrap();
+                if let Ok(mut tile_texture_index) = tile_texture_query.get_mut(tile) {
+                    tile_texture_index.0 = tile_texture_index_of_cell_kind(cell_kind).unwrap();
+                } else {
+                    info!("No texture found for CellKind={:?} at position={:#?}", cell_kind, pt);
+                }
             }
         }
     }

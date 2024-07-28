@@ -81,11 +81,26 @@ impl Grid {
 pub enum CellKind {
     Empty,
     Apple,
-    Snake,
-    SnakeHead,
+    SnakeHeadN,
+    SnakeHeadE,
+    SnakeHeadS,
+    SnakeHeadW,
+    SnakeBodyNS,
+    SnakeBodyEW,
+    SnakeBodyNE,
+    SnakeBodySE,
+    SnakeBodySW,
+    SnakeBodyNW,
+    SnakeTailN,
+    SnakeTailE,
+    SnakeTailS,
+    SnakeTailW,
     Wall,
     Crash,
 }
+// FUTURE: Head North/South/East/West; Tail N/S/E/W; body NS/EW
+// FUTURE: Head eating apple N/S/E/W; body containing apple NW/EW
+
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub struct Cell {
@@ -131,6 +146,16 @@ impl Direction {
             Direction::West => 3,
         }
     }
+    
+    fn of_offset(offset: Point) -> Direction {
+        match (offset.x, offset.y) {
+            (0, 1) => Direction::North,
+            (1, 0) => Direction::East,
+            (0, -1) => Direction::South,
+            (-1, 0) => Direction::West,
+            _ => panic!("Unexpected offset value: {offset:?}"),
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
@@ -160,6 +185,50 @@ pub struct Snake {
     pub to_grow: usize,
 }
 
+fn dir_to_snake_head(dir: Direction) -> CellKind {
+    match dir {
+        Direction::North => CellKind::SnakeHeadN,
+        Direction::East  => CellKind::SnakeHeadE,
+        Direction::South => CellKind::SnakeHeadS,
+        Direction::West  => CellKind::SnakeHeadW,
+    }
+}
+
+fn dir_to_snake_tail(dir: Direction) -> CellKind {
+    match dir {
+        Direction::North => CellKind::SnakeTailN,
+        Direction::East  => CellKind::SnakeTailE,
+        Direction::South => CellKind::SnakeTailS,
+        Direction::West  => CellKind::SnakeTailW,
+    }
+}
+
+fn dir_and_head_to_body(dir: Direction, kind_old_head: CellKind) -> CellKind {
+    match (dir, kind_old_head) {
+        (Direction::North, CellKind::SnakeHeadN) => CellKind::SnakeBodyNS,
+        (Direction::North, CellKind::SnakeHeadE) => CellKind::SnakeBodyNW,
+        (Direction::North, CellKind::SnakeHeadS) => CellKind::SnakeBodyNS,  // Death!
+        (Direction::North, CellKind::SnakeHeadW) => CellKind::SnakeBodyNE,
+
+        (Direction::East, CellKind::SnakeHeadN) => CellKind::SnakeBodySE,
+        (Direction::East, CellKind::SnakeHeadE) => CellKind::SnakeBodyEW,
+        (Direction::East, CellKind::SnakeHeadS) => CellKind::SnakeBodyNE,
+        (Direction::East, CellKind::SnakeHeadW) => CellKind::SnakeBodyEW,   // Death!
+
+        (Direction::South, CellKind::SnakeHeadN) => CellKind::SnakeBodyNS,  // Death!
+        (Direction::South, CellKind::SnakeHeadE) => CellKind::SnakeBodySW,
+        (Direction::South, CellKind::SnakeHeadS) => CellKind::SnakeBodyNS,
+        (Direction::South, CellKind::SnakeHeadW) => CellKind::SnakeBodySE,
+        
+        (Direction::West, CellKind::SnakeHeadN) => CellKind::SnakeBodySW,
+        (Direction::West, CellKind::SnakeHeadE) => CellKind::SnakeBodyEW,   // Death!
+        (Direction::West, CellKind::SnakeHeadS) => CellKind::SnakeBodyNW,
+        (Direction::West, CellKind::SnakeHeadW) => CellKind::SnakeBodyEW,
+
+        _ => panic!("unexpected kind for dir_and_head_to_body(): {kind_old_head:?}"),
+    }
+}
+
 impl Snake {
     pub(self) fn new(grid: &mut Grid) -> Snake {
         let locations = VecDeque::<Point>::with_capacity(grid.width as usize * grid.height as usize);
@@ -171,14 +240,14 @@ impl Snake {
         self.locations.clear();
         self.to_grow = 0;
         for _ in 0..1000 {
-            let head = grid.rand_point();
-            if grid.get_cell(head).kind != CellKind::Empty { continue; }
+            let tail = grid.rand_point();
+            if grid.get_cell(tail).kind != CellKind::Empty { continue; }
             let dir = Direction::random();
             let offset = dir.to_point();
-            let tail = head.add(offset);
-            if grid.get_cell(tail).kind != CellKind::Empty { continue; }
-            grid.get_cell_mut(head).kind = CellKind::SnakeHead;
-            grid.get_cell_mut(tail).kind = CellKind::Snake;
+            let head = tail.add(offset);
+            if grid.get_cell(head).kind != CellKind::Empty { continue; }
+            grid.get_cell_mut(head).kind = dir_to_snake_head(dir);
+            grid.get_cell_mut(tail).kind = dir_to_snake_tail(dir);
             self.locations.push_front(tail);
             self.locations.push_front(head);
             self.head_location = head;
@@ -286,15 +355,14 @@ impl SnakeGame {
         let offset = direction.to_point();
         let new_location = self.snake.head_location.add(offset);
         let old_head_cell = self.grid.get_cell_mut(self.snake.head_location);
-        old_head_cell.kind = CellKind::Snake;
+        old_head_cell.kind = dir_and_head_to_body(direction, old_head_cell.kind);
         self.grid_changes.push(self.snake.head_location);
         let new_cell = self.grid.get_cell_mut(new_location);
         let kind_hit = new_cell.kind;
-        new_cell.kind = CellKind::SnakeHead;
+        new_cell.kind = dir_to_snake_head(direction);
         self.grid_changes.push(new_location);
         match kind_hit {
             CellKind::Apple => {
-                new_cell.kind = CellKind::Snake;
                 self.apples_eaten += 1;
                 self.apple.location = match new_apple_location {
                     None => self.grid.new_viable_apple_location(),
@@ -307,27 +375,42 @@ impl SnakeGame {
                 self.snake.to_grow += Self::GROW_INCREMENT;
             }
             CellKind::Empty => {}
-            CellKind::Snake | CellKind::SnakeHead | CellKind::Wall | CellKind::Crash => {
+            _ => {
                 self.playback_events.push(PlaybackEvents::GameOver);
                 self.state = GameState::GameOver;
                 new_cell.kind = CellKind::Crash;
                 self.grid_changes.push(new_location);
             }
         };
+
+        // Push on new Head
+        self.snake.locations.push_front(new_location);
+        self.snake.head_location = new_location;
+
+        // Move tail, if needed
         if self.snake.to_grow == 0 {
-            // Snake keeps same size, so we pop off the tail, then push the new head to simulate
-            // movement
+            // Snake keeps same size, so we pop off the tail to keep the same length, since we already pushed on a new head.
             let old_tail_location = self.snake.locations.pop_back().unwrap();
             let old_tail_cell = self.grid.get_cell_mut(old_tail_location);
             old_tail_cell.kind = CellKind::Empty;
             self.grid_changes.push(old_tail_location);
+            // Now fix up the old body segment to now be a tail
+            let new_tail_location = Self::peek_back(&self.snake.locations, 0);
+            let new_first_body_location = Self::peek_back(&self.snake.locations, 1);
+            let tail_direction = Direction::of_offset(Point { x: new_first_body_location.x - new_tail_location.x, y: new_first_body_location.y - new_tail_location.y });
+            let new_tail_cell = self.grid.get_cell_mut(new_tail_location);
+            new_tail_cell.kind = dir_to_snake_tail(tail_direction);
+            self.grid_changes.push(new_tail_location);
         } else {
             self.snake.to_grow -= 1;
         };
-        self.snake.locations.push_front(new_location);
-        self.snake.head_location = new_location;
     }
 
+    fn peek_back(locations: &VecDeque<Point>, offset_from_end: usize) -> Point {
+        locations[locations.len() - 1 - offset_from_end]
+    }
+
+    // FUTURE: For snake body, provide distance from tail? I.e. how long until tile disappears?
     pub fn wall_and_body_distances(&self) -> ([i16; 4], [i16; 4]) {
         let mut dist_walls: [i16; 4] = [0; 4];
         let mut dist_snake: [i16; 4] = [0; 4];
@@ -335,7 +418,12 @@ impl SnakeGame {
         for dir in [Direction::North, Direction::East, Direction::South, Direction::West] {
             let i = dir.to_index();
             dist_walls[i] = self.distance_to(head, dir, &[CellKind::Wall]);
-            dist_snake[i] = self.distance_to(head, dir, &[CellKind::Snake, CellKind::SnakeHead]);
+            dist_snake[i] = self.distance_to(head, dir, &[
+                CellKind::SnakeHeadN, CellKind::SnakeHeadE, CellKind::SnakeHeadS, CellKind::SnakeHeadW,
+                CellKind::SnakeBodyNS, CellKind::SnakeBodyEW, 
+                CellKind::SnakeBodyNE, CellKind::SnakeBodySW, CellKind::SnakeBodySE, CellKind::SnakeBodyNW,
+                CellKind::SnakeTailN, CellKind::SnakeTailE, CellKind::SnakeTailS, CellKind::SnakeTailW,
+            ]);
         }
         (dist_walls, dist_snake)
     }

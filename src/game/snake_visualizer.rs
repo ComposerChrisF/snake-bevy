@@ -23,8 +23,8 @@ use crate::screen::Screen;
 use crate::snake_game;
 use crate::AppSet;
 
-use super::spawn::level::SpawnLevel;
-
+use super::assets::HandleMap;
+use super::assets::ImageKey;
 
 #[derive(Reflect, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Dir {
@@ -98,6 +98,8 @@ fn record_movement_controller(
 
 
 
+#[derive(Event, Debug)]
+pub struct SpawnLevel;
 
 
 #[derive(Component)]
@@ -261,26 +263,13 @@ fn copy_snake_into_tilemap(snake_locations: &VecDeque<snake_game::Point>, tilema
             .id();
         tile_storage.set(&tile_pos, tile_entity);
     }
-
-    // Testing:
-    //let pt = snake_locations[0];
-    //let tile_pos = TilePos { x: pt.x as u32, y: pt.y as u32 };
-    //let tile_entity = commands
-    //    .spawn(TileBundle {
-    //        position: tile_pos,
-    //        tilemap_id: TilemapId(tilemap_entity),
-    //        ..Default::default()
-    //    })
-    //    .insert(TileTextureIndex(TILE_CRASH))
-    //    .id();
-    //tile_storage.set(&tile_pos, tile_entity);
 }
 
 
 fn spawn_level(
     _trigger: Trigger<SpawnLevel>,
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    image_handles: Res<HandleMap<ImageKey>>,
 ) {
     // Create the underlying snake_game--essentially our data model
     let snake_game = snake_game::SnakeGame::new(None);
@@ -294,7 +283,7 @@ fn spawn_level(
     copy_snake_into_tilemap(&snake_game.snake.locations, tilemap_entity, &mut tile_storage, &mut commands);
     let tile_pixel_size = TilemapTileSize { x: 16.0, y: 16.0 };
     let grid_size = tile_pixel_size.into();
-    let texture_handle: Handle<Image> = asset_server.load("images/tiles.png");
+    let texture_handle: Handle<Image> = image_handles[&ImageKey::SnakeTiles].clone_weak(); //asset_server.load("images/snake_tiles.png");
     commands.entity(tilemap_entity).insert(
         TilemapBundle {
             grid_size,
@@ -364,11 +353,6 @@ fn update_tilemap(
     let is_game_over = snake_game.state == snake_game::GameState::GameOver;
     //if is_game_over { return; }   // We *could*n short-circuit updating, but only if we track whether we've already updated once after a game over
     
-    //let map_size = TilemapSize { x: snake_game.grid.width as u32, y: snake_game.grid.height as u32 };
-    //copy_grid_into_tilemap(&snake_game.grid, tilemap_entity, &mut tile_storage, &map_size, commands);
-    //copy_snake_into_tilemap(&snake_game.snake.locations, tilemap_entity, &mut tile_storage, commands);
-    
-
     // We don't need to update the *entire* map, just the locations where things might have 
     // changed (see comments on SnakeGame::move_snake() for details):
     // 1. The following snake location tiles must be recomputed: 

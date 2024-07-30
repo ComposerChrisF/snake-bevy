@@ -1,3 +1,5 @@
+// TODO: Move into separate crate!
+
 use std::{collections::VecDeque, ops};
 use rand::Rng;
 use serde::{Serialize, Deserialize};
@@ -10,7 +12,7 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub const WIDTH: i16 = 25;
+    pub const WIDTH:  i16 = 25;
     pub const HEIGHT: i16 = 25;
     pub const _MAX_WIDTH_HEIGHT: i16 = 25; // Maximum of width & height, i.e. WIDTH.max(HEIGHT)
 
@@ -123,7 +125,7 @@ impl Direction {
             Direction::North => Point { x: 0, y: 1, },
             Direction::East  => Point { x: 1, y: 0, },
             Direction::South => Point { x: 0, y: -1, },
-            Direction::West => Point { x: -1, y: 0, },
+            Direction::West  => Point { x: -1, y: 0, },
         }
     }
 
@@ -132,7 +134,7 @@ impl Direction {
             Direction::North => 0,
             Direction::East  => 1,
             Direction::South => 2,
-            Direction::West => 3,
+            Direction::West  => 3,
         }
     }
 }

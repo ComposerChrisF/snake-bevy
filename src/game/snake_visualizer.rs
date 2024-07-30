@@ -26,6 +26,41 @@ use crate::AppSet;
 use super::assets::HandleMap;
 use super::assets::ImageKey;
 
+#[derive(Event, Debug)]
+pub struct UpdateScore(usize);
+
+
+
+#[derive(Event, Debug)]
+pub struct SpawnLevel;
+
+
+#[derive(Component)]
+struct MySnakeGame {
+    snake_game: snake_game::SnakeGame,
+    location_apple_prev: snake_game::Point,
+    location_tail_prev: snake_game::Point,
+}
+
+pub(super) fn plugin(app: &mut App) {
+    // Register (i.e. record) what movement the player takes via keyboard/etc.
+    app.register_type::<SnakeMovementController>();
+    app.add_systems(Update, record_movement_controller.in_set(AppSet::RecordInput));
+
+    // Apply movement based on controls.
+    app.add_systems(Update, apply_movement.in_set(AppSet::Update));
+
+    // We make use of these Bevy plugins:
+    app.add_plugins(TilemapPlugin);
+
+    // We watch for these events:
+    app.observe(spawn_level);
+    app.observe(update_score);
+}
+
+
+
+
 #[derive(Reflect, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Dir {
     #[default]
@@ -64,15 +99,15 @@ fn record_movement_controller(
     // FUTURE: Ignore reversing direction, since this always produces a crash
     if input.pressed(KeyCode::KeyW) || input.pressed(KeyCode::ArrowUp) {
         player_movement_intent = Some(Dir::Up);
-        if input.just_pressed(KeyCode::KeyW) || input.just_pressed(KeyCode::ArrowUp) { should_reset_timer = true; }
+        if input.just_pressed(KeyCode::KeyW) || input.just_pressed(KeyCode::ArrowUp)    { should_reset_timer = true; }
     }
     if input.pressed(KeyCode::KeyS) || input.pressed(KeyCode::ArrowDown) {
         player_movement_intent = Some(Dir::Down);
-        if input.just_pressed(KeyCode::KeyS) || input.just_pressed(KeyCode::ArrowDown) { should_reset_timer = true; }
+        if input.just_pressed(KeyCode::KeyS) || input.just_pressed(KeyCode::ArrowDown)  { should_reset_timer = true; }
     }
     if input.pressed(KeyCode::KeyA) || input.pressed(KeyCode::ArrowLeft) {
         player_movement_intent = Some(Dir::Left);
-        if input.just_pressed(KeyCode::KeyA) || input.just_pressed(KeyCode::ArrowLeft) { should_reset_timer = true; }
+        if input.just_pressed(KeyCode::KeyA) || input.just_pressed(KeyCode::ArrowLeft)  { should_reset_timer = true; }
     }
     if input.pressed(KeyCode::KeyD) || input.pressed(KeyCode::ArrowRight) {
         player_movement_intent = Some(Dir::Right);
@@ -97,32 +132,6 @@ fn record_movement_controller(
 }
 
 
-
-#[derive(Event, Debug)]
-pub struct SpawnLevel;
-
-
-#[derive(Component)]
-struct MySnakeGame {
-    snake_game: snake_game::SnakeGame,
-    location_apple_prev: snake_game::Point,
-    location_tail_prev: snake_game::Point,
-}
-
-pub(super) fn plugin(app: &mut App) {
-    // Register (i.e. record) what movement the player takes via keyboard/etc.
-    app.register_type::<SnakeMovementController>();
-    app.add_systems(Update, record_movement_controller.in_set(AppSet::RecordInput));
-
-
-    // Apply movement based on controls.
-    app.add_systems(Update, apply_movement.in_set(AppSet::Update));
-
-
-    app.add_plugins(TilemapPlugin);
-
-    app.observe(spawn_level);
-}
 
 const TILE_CRASH:         u32 = 0;
 const TILE_APPLE:         u32 = 1;
@@ -310,8 +319,43 @@ fn spawn_level(
         SnakeMovementController { player_movement_intent: None, is_paused: false },
         StateScoped(Screen::Playing),
     ));
+
+    // The Score
+    commands.spawn((
+        TextBundle::from_section(
+            "Score: 0",
+            TextStyle {
+                font_size: 20.0,
+                color: Color::WHITE,
+                ..default()
+            },
+        )
+        .with_text_justify(JustifyText::Center)
+        .with_style(bevy::ui::Style {
+             position_type: PositionType::Absolute,
+             //align_items: AlignItems::Center,
+             //align_content: AlignContent::Center,
+             left: Val::Percent(0.0),
+             width: Val::Percent(100.0),
+             top: Val::Px(0.0),
+             ..default()
+        }),
+        StateScoped(Screen::Playing),
+    ));
 }
 
+
+fn update_score(
+    trigger: Trigger<UpdateScore>,
+    //mut commands: Commands,
+    mut query: Query<&mut Text>,
+) {
+    info!("update_score(): {}", trigger.event().0);
+    let new_score = trigger.event().0;
+    for mut text in query.iter_mut() {
+        text.sections[0].value = format!("Score: {new_score}");
+    }
+}
 
 
 #[derive(Component)]
@@ -329,9 +373,13 @@ fn apply_movement(
         if let Some(dir) = movement.player_movement_intent {
             let current_time = time.elapsed_seconds_f64();
             if current_time - last_update.0 > 0.1 {
+                let prev_apples_eaten = my_snake_game.snake_game.apples_eaten;
                 my_snake_game.snake_game.move_snake(dir.to_snake_direction(), None);
                 let (tile_storage, tilemap_entity) = tilemap_query.get_single_mut().unwrap();
                 update_tilemap(&mut commands, &mut my_snake_game, tilemap_entity, tile_storage, &mut tile_texture_query);
+                if prev_apples_eaten != my_snake_game.snake_game.apples_eaten {
+                    commands.trigger(UpdateScore(my_snake_game.snake_game.apples_eaten));
+                }
                 last_update.0 = current_time;
             }
         }

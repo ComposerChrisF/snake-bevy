@@ -44,6 +44,10 @@ impl FromWorld for HandleMap<ImageKey> {
 pub enum SfxKey {
     ButtonHover,
     ButtonPress,
+    Crash(usize),
+    Eating(usize),
+    Growing(usize),
+    Tick(usize),
 }
 
 impl AssetKey for SfxKey {
@@ -54,14 +58,39 @@ impl FromWorld for HandleMap<SfxKey> {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.resource::<AssetServer>();
         [
-            (
-                SfxKey::ButtonHover,
-                asset_server.load("audio/sfx/button_hover.ogg"),
-            ),
-            (
-                SfxKey::ButtonPress,
-                asset_server.load("audio/sfx/button_press.ogg"),
-            ),
+            ( SfxKey::ButtonHover, asset_server.load("audio/sfx/button_hover.ogg") ),
+            ( SfxKey::ButtonPress, asset_server.load("audio/sfx/button_press.ogg") ),
+            ( SfxKey::Crash(1), asset_server.load("audio/sfx/crash_1.ogg") ),
+            ( SfxKey::Crash(2), asset_server.load("audio/sfx/crash_2.ogg") ),
+            ( SfxKey::Crash(3), asset_server.load("audio/sfx/crash_3.ogg") ),
+            ( SfxKey::Crash(4), asset_server.load("audio/sfx/crash_4.ogg") ),
+            ( SfxKey::Eating(1), asset_server.load("audio/sfx/eating_1.ogg") ),
+            ( SfxKey::Eating(2), asset_server.load("audio/sfx/eating_2.ogg") ),
+            ( SfxKey::Eating(3), asset_server.load("audio/sfx/eating_3.ogg") ),
+            ( SfxKey::Eating(4), asset_server.load("audio/sfx/eating_4.ogg") ),
+            ( SfxKey::Growing( 1), asset_server.load("audio/sfx/growing_1.ogg") ),
+            ( SfxKey::Growing( 2), asset_server.load("audio/sfx/growing_2.ogg") ),
+            ( SfxKey::Growing( 3), asset_server.load("audio/sfx/growing_3.ogg") ),
+            ( SfxKey::Growing( 4), asset_server.load("audio/sfx/growing_4.ogg") ),
+            ( SfxKey::Growing( 5), asset_server.load("audio/sfx/growing_5.ogg") ),
+            ( SfxKey::Growing( 6), asset_server.load("audio/sfx/growing_6.ogg") ),
+            ( SfxKey::Growing( 7), asset_server.load("audio/sfx/growing_7.ogg") ),
+            ( SfxKey::Growing( 8), asset_server.load("audio/sfx/growing_8.ogg") ),
+            ( SfxKey::Growing( 9), asset_server.load("audio/sfx/growing_9.ogg") ),
+            ( SfxKey::Growing(10), asset_server.load("audio/sfx/growing_a.ogg") ),
+            ( SfxKey::Growing(11), asset_server.load("audio/sfx/growing_b.ogg") ),
+            ( SfxKey::Tick( 1), asset_server.load("audio/sfx/timer_tick_1.ogg") ),
+            ( SfxKey::Tick( 2), asset_server.load("audio/sfx/timer_tick_2.ogg") ),
+            ( SfxKey::Tick( 3), asset_server.load("audio/sfx/timer_tick_3.ogg") ),
+            ( SfxKey::Tick( 4), asset_server.load("audio/sfx/timer_tick_4.ogg") ),
+            ( SfxKey::Tick( 5), asset_server.load("audio/sfx/timer_tick_5.ogg") ),
+            ( SfxKey::Tick( 6), asset_server.load("audio/sfx/timer_tick_6.ogg") ),
+            ( SfxKey::Tick( 7), asset_server.load("audio/sfx/timer_tick_7.ogg") ),
+            ( SfxKey::Tick( 8), asset_server.load("audio/sfx/timer_tick_8.ogg") ),
+            ( SfxKey::Tick( 9), asset_server.load("audio/sfx/timer_tick_9.ogg") ),
+            ( SfxKey::Tick(10), asset_server.load("audio/sfx/timer_tick_a.ogg") ),
+            ( SfxKey::Tick(11), asset_server.load("audio/sfx/timer_tick_b.ogg") ),
+            ( SfxKey::Tick(12), asset_server.load("audio/sfx/timer_tick_c.ogg") ),
         ]
         .into()
     }

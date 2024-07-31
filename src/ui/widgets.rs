@@ -107,7 +107,7 @@ impl<T: Spawn> Widgets for T {
                         color: LABEL_TEXT,
                         ..default()
                     },
-                ),
+                ).with_text_justify(JustifyText::Center),
             ));
         });
         entity

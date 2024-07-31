@@ -21,10 +21,13 @@ use bevy_ecs_tilemap::TilemapPlugin;
 
 use crate::screen::Screen;
 use crate::snake_game;
+use crate::snake_game::GameState;
 use crate::AppSet;
 
 use super::assets::HandleMap;
 use super::assets::ImageKey;
+use super::assets::SfxKey;
+use super::audio::sfx::PlaySfx;
 
 #[derive(Event, Debug)]
 pub struct UpdateScore(usize);
@@ -38,8 +41,8 @@ pub struct SpawnLevel;
 #[derive(Component)]
 struct MySnakeGame {
     snake_game: snake_game::SnakeGame,
-    location_apple_prev: snake_game::Point,
-    location_tail_prev: snake_game::Point,
+    location_apple_prev: snake_game::GridPoint,
+    location_tail_prev: snake_game::GridPoint,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -172,7 +175,7 @@ fn copy_grid_into_tilemap(grid: &snake_game::Grid, tilemap_entity: Entity, tile_
     for x in 0..map_size.x {
         for y in 0..map_size.y {
             let tile_pos = TilePos { x, y };
-            let cell = grid.get_cell(snake_game::Point { x: x as i16, y: y as i16 });
+            let cell = grid.get_cell(snake_game::GridPoint { x: x as i16, y: y as i16 });
             if cell.kind == snake_game::CellKind::Snake { continue; }   // Don't copy the snake; use copy_snake_into_tilemap() for that.
             let tile_texture_index = tile_texture_index_of_cell_kind(cell.kind);
             if let Some(tile_texture_index) = tile_texture_index {
@@ -190,7 +193,7 @@ fn copy_grid_into_tilemap(grid: &snake_game::Grid, tilemap_entity: Entity, tile_
     }
 }
 
-fn dir_of_offset(offset: snake_game::Point) -> Dir {
+fn dir_of_offset(offset: snake_game::GridPoint) -> Dir {
     match (offset.x, offset.y) {
         ( 0,  1) => Dir::Up,
         ( 1,  0) => Dir::Right,
@@ -242,7 +245,7 @@ fn tile_texture_index_of_prev_and_next_directions(dir_prev: Dir, dir_next: Dir) 
     }
 }
 
-fn copy_snake_into_tilemap(snake_locations: &VecDeque<snake_game::Point>, tilemap_entity: Entity, tile_storage: &mut TileStorage, commands: &mut Commands) {
+fn copy_snake_into_tilemap(snake_locations: &VecDeque<snake_game::GridPoint>, tilemap_entity: Entity, tile_storage: &mut TileStorage, commands: &mut Commands) {
     assert!(snake_locations.len() >= 2);
     let snake_length = snake_locations.len();
     for (i, &pt) in snake_locations.iter().enumerate() {    // Iterates from head (at snake_locations[0]) to tail (at snake_locations[len - 1])
@@ -340,15 +343,17 @@ fn spawn_level(
              top: Val::Px(0.0),
              ..default()
         }),
+        Score,
         StateScoped(Screen::Playing),
     ));
 }
 
+#[derive(Component)]
+struct Score;
 
 fn update_score(
     trigger: Trigger<UpdateScore>,
-    //mut commands: Commands,
-    mut query: Query<&mut Text>,
+    mut query: Query<&mut Text, With<Score>>,
 ) {
     info!("update_score(): {}", trigger.event().0);
     let new_score = trigger.event().0;
@@ -374,11 +379,24 @@ fn apply_movement(
             let current_time = time.elapsed_seconds_f64();
             if current_time - last_update.0 > 0.1 {
                 let prev_apples_eaten = my_snake_game.snake_game.apples_eaten;
+                let prev_snake_len = my_snake_game.snake_game.snake.locations.len();
+                let prev_game_state = my_snake_game.snake_game.state;
                 my_snake_game.snake_game.move_snake(dir.to_snake_direction(), None);
                 let (tile_storage, tilemap_entity) = tilemap_query.get_single_mut().unwrap();
                 update_tilemap(&mut commands, &mut my_snake_game, tilemap_entity, tile_storage, &mut tile_texture_query);
                 if prev_apples_eaten != my_snake_game.snake_game.apples_eaten {
                     commands.trigger(UpdateScore(my_snake_game.snake_game.apples_eaten));
+                }
+
+                // Generate sound
+                if prev_game_state != my_snake_game.snake_game.state && my_snake_game.snake_game.state == GameState::GameOver {
+                    commands.trigger(PlaySfx::Key(SfxKey::Crash(0)));
+                } else if prev_apples_eaten != my_snake_game.snake_game.apples_eaten {
+                    commands.trigger(PlaySfx::Key(SfxKey::Eating(0)));
+                } else if prev_snake_len != my_snake_game.snake_game.snake.locations.len() {
+                    commands.trigger(PlaySfx::Key(SfxKey::Growing(0)));
+                } else if my_snake_game.snake_game.state != GameState::GameOver {
+                    commands.trigger(PlaySfx::Key(SfxKey::Tick(0)));
                 }
                 last_update.0 = current_time;
             }
@@ -471,7 +489,7 @@ fn update_tilemap(
 }
 
 fn update_tilemap_at_point(
-    pt: snake_game::Point,
+    pt: snake_game::GridPoint,
     tile_texture_index: Option<u32>,
     commands: &mut Commands,
     tilemap_entity: Entity,

@@ -6,10 +6,12 @@ mod ui;
 mod snake_game;
 
 use bevy::{
-    asset::AssetMetaCheck,
-    audio::{AudioPlugin, Volume},
-    prelude::*,
+    asset::AssetMetaCheck, audio::{AudioPlugin, Volume}, prelude::*, render::camera::ScalingMode, window::WindowResolution
 };
+
+// TODO: Base these off of the snake game size?
+pub const WINDOW_SIZE_X: f32 = 40.0 * 16.0 + 40.0;
+pub const WINDOW_SIZE_Y: f32 = 30.0 * 16.0 + 40.0;
 
 pub struct AppPlugin;
 
@@ -40,6 +42,7 @@ impl Plugin for AppPlugin {
                         canvas: Some("#bevy".to_string()),
                         fit_canvas_to_parent: true,
                         prevent_default_event_handling: true,
+                        resolution: WindowResolution::new(WINDOW_SIZE_X, WINDOW_SIZE_Y).with_scale_factor_override(1.0),
                         ..default()
                     }
                     .into(),
@@ -76,9 +79,15 @@ enum AppSet {
 }
 
 fn spawn_camera(mut commands: Commands) {
+    let mut camera = Camera2dBundle::default();
+
+    // Automatically change camera based on size of containing window:
+    camera.projection.scaling_mode = ScalingMode::FixedVertical(WINDOW_SIZE_Y);
+    camera.projection.area = Rect::new(0.0, 0.0, WINDOW_SIZE_X, WINDOW_SIZE_Y);
+    
     commands.spawn((
         Name::new("Camera"),
-        Camera2dBundle::default(),
+        camera,
         // Render all UI to this camera.
         // Not strictly necessary since we only use one camera,
         // but if we don't use this component, our UI will disappear as soon

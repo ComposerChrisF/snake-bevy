@@ -12,8 +12,8 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub const WIDTH:  i16 = 25;
-    pub const HEIGHT: i16 = 25;
+    pub const WIDTH:  i16 = 40;
+    pub const HEIGHT: i16 = 30;
     pub const _MAX_WIDTH_HEIGHT: i16 = 25; // Maximum of width & height, i.e. WIDTH.max(HEIGHT)
 
     pub fn new() -> Grid {
@@ -50,26 +50,26 @@ impl Grid {
         let i = y * Self::WIDTH + x;
         cells[i as usize] = Cell { kind };
     }
-    pub fn is_in_bounds(&self, pt: Point) -> bool {
+    pub fn is_in_bounds(&self, pt: GridPoint) -> bool {
         pt.x >= 0 && pt.y >= 0 && pt.x < Self::WIDTH && pt.y < Self::HEIGHT
     }
-    pub fn get_cell(&self, pt: Point) -> &Cell {
+    pub fn get_cell(&self, pt: GridPoint) -> &Cell {
         if !self.is_in_bounds(pt) { return &self.cells[0]; }
         let i = pt.y * Self::WIDTH + pt.x;
         &self.cells[i as usize]
     }
-    pub fn get_cell_mut(&mut self, pt: Point) -> &mut Cell {
+    pub fn get_cell_mut(&mut self, pt: GridPoint) -> &mut Cell {
         if !self.is_in_bounds(pt)  { return &mut self.cells[0]; }
         let i = pt.y * Self::WIDTH + pt.x;
         &mut self.cells[i as usize]
     }
-    pub fn rand_point(&self) -> Point {
-        Point {
+    pub fn rand_point(&self) -> GridPoint {
+        GridPoint {
             x: rand::thread_rng().gen_range(1..(self.width - 2)),
             y: rand::thread_rng().gen_range(1..(self.height - 2)),
         }
     }
-    pub fn new_viable_apple_location(&self) -> Point {
+    pub fn new_viable_apple_location(&self) -> GridPoint {
         for _ in 0..10000 {
             let loc = self.rand_point();
             if self.get_cell(loc).kind != CellKind::Empty { continue; }
@@ -120,12 +120,12 @@ impl Direction {
             _ => panic!("Bad i in from_index()"),
         }
     }
-    pub fn to_point(self) -> Point {
+    pub fn to_point(self) -> GridPoint {
         match self {
-            Direction::North => Point { x: 0, y: 1, },
-            Direction::East  => Point { x: 1, y: 0, },
-            Direction::South => Point { x: 0, y: -1, },
-            Direction::West  => Point { x: -1, y: 0, },
+            Direction::North => GridPoint { x: 0, y: 1, },
+            Direction::East  => GridPoint { x: 1, y: 0, },
+            Direction::South => GridPoint { x: 0, y: -1, },
+            Direction::West  => GridPoint { x: -1, y: 0, },
         }
     }
 
@@ -140,19 +140,19 @@ impl Direction {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
-pub struct Point {
+pub struct GridPoint {
     pub x: i16,
     pub y: i16,
 }
 
-impl Point {
+impl GridPoint {
     pub fn new(x: i16, y: i16) -> Self {
         Self {
             x, y
         }
     }
-    pub fn add(self, other: Point) -> Point {
-        Point {
+    pub fn add(self, other: GridPoint) -> GridPoint {
+        GridPoint {
             x: self.x + other.x,
             y: self.y + other.y,
         }
@@ -163,33 +163,33 @@ impl Point {
     }
 }
 
-impl ops::Add<Self> for Point {
+impl ops::Add<Self> for GridPoint {
     type Output = Self;
     fn add(self, rhs:Self) -> Self::Output {
-        Point { x: self.x + rhs.x, y: self.y + rhs.y }
+        GridPoint { x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
 
-impl ops::Sub<Self> for Point {
-    type Output = Point;
-    fn sub(self, rhs:Point) -> Self::Output {
-        Point { x: self.x - rhs.x, y: self.y - rhs.y }
+impl ops::Sub<Self> for GridPoint {
+    type Output = GridPoint;
+    fn sub(self, rhs:GridPoint) -> Self::Output {
+        GridPoint { x: self.x - rhs.x, y: self.y - rhs.y }
     }
 }
 
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Snake {
-    pub head_location: Point,
-    pub locations: VecDeque<Point>,
+    pub head_location: GridPoint,
+    pub locations: VecDeque<GridPoint>,
     pub to_grow: usize,
 }
 
 
 impl Snake {
     pub(self) fn new(grid: &mut Grid) -> Snake {
-        let locations = VecDeque::<Point>::with_capacity(grid.width as usize * grid.height as usize);
-        let mut new_snake = Snake { head_location: Point::default(), locations, to_grow: 0 };
+        let locations = VecDeque::<GridPoint>::with_capacity(grid.width as usize * grid.height as usize);
+        let mut new_snake = Snake { head_location: GridPoint::default(), locations, to_grow: 0 };
         new_snake.restart(grid);
         new_snake
     }
@@ -220,7 +220,7 @@ impl Snake {
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub struct Apple {
-    pub location: Point,
+    pub location: GridPoint,
 }
 
 
@@ -234,9 +234,9 @@ pub enum GameState {
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum PlaybackEvents {
-    NewGame,                    // Initialize grid
-    NewAppleLocation(Point),    // Place apple
-    MoveSnake(Direction),       // Move snake
+    NewGame,                        // Initialize grid
+    NewAppleLocation(GridPoint),    // Place apple
+    MoveSnake(Direction),           // Move snake
     GameOver,
 }
 
@@ -254,7 +254,7 @@ pub struct SnakeGame {
 impl SnakeGame {
     pub const GROW_INCREMENT: usize = 5;
 
-    pub fn new(new_apple_location: Option<Point>) -> Self {
+    pub fn new(new_apple_location: Option<GridPoint>) -> Self {
         let mut grid = Grid::new();
         let snake = Snake::new(&mut grid);
         let apple = Apple { 
@@ -279,7 +279,7 @@ impl SnakeGame {
         new_grid
     }
 
-    pub fn restart(&mut self, new_apple_location: Option<Point>) {
+    pub fn restart(&mut self, new_apple_location: Option<GridPoint>) {
         self.grid.restart();
         self.snake.restart(&mut self.grid);
         self.apple.location = match new_apple_location {
@@ -309,7 +309,7 @@ impl SnakeGame {
     /// 2. If the apple moved, then 
     ///     a. the old apple location must either be empty or a snake
     ///     b. the new apple location is an apple.
-    pub fn move_snake(&mut self, direction: Direction, new_apple_location: Option<Point>) {
+    pub fn move_snake(&mut self, direction: Direction, new_apple_location: Option<GridPoint>) {
         //info!("move_snake({direction:#?}, {new_apple_location:#?}); snake.to_grow={}; GameState={:?}", self.snake.to_grow, self.state);
         if self.state != GameState::Running { return; }
         self.playback_events.push(PlaybackEvents::MoveSnake(direction));
@@ -330,6 +330,7 @@ impl SnakeGame {
         let kind_hit = new_cell.kind;
         new_cell.kind = CellKind::Snake;
         match kind_hit {
+            CellKind::Empty => {}
             CellKind::Apple => {
                 self.apples_eaten += 1;
                 self.apple.location = match new_apple_location {
@@ -341,7 +342,6 @@ impl SnakeGame {
                 self.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
                 self.snake.to_grow += Self::GROW_INCREMENT;
             }
-            CellKind::Empty => {}
             _ => {
                 self.playback_events.push(PlaybackEvents::GameOver);
                 self.state = GameState::GameOver;
@@ -367,7 +367,7 @@ impl SnakeGame {
         }
         (dist_walls, dist_snake)
     }
-    fn distance_to(&self, pt_start: Point, direction: Direction, target: CellKind) -> i16 {
+    fn distance_to(&self, pt_start: GridPoint, direction: Direction, target: CellKind) -> i16 {
         let offset = direction.to_point();
         let mut distance = 0;
         let mut pt_test = pt_start.add(offset);

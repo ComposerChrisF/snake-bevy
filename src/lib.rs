@@ -4,6 +4,7 @@ mod game;
 mod screen;
 mod ui;
 mod snake_game;
+mod neural_net;
 
 use bevy::{
     asset::AssetMetaCheck, audio::{AudioPlugin, Volume}, prelude::*, render::camera::ScalingMode, window::WindowResolution

@@ -1,18 +1,16 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-use std::{cell::Cell, rc::Rc};
-
 use bevy::utils::hashbrown::{HashMap, HashSet};
 use rand::{thread_rng, Rng};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ActivationFunction {
     None,       // f(x) = x, i.e. Linear
-    Sigmoid,    // f(x) = 1.0 / (1.0 + exp(-x))
-    ReLU,       // f(x) = if x > 0 { x } else { 0.0 }
-    LReLU,      // f(x) = if x > 0 { x } else ( 0.1 * x )
-    Tanh,       // f(x) = tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
+    Sigmoid,    // f(x) = 1.0 / (1.0 + exp(-x));                                f(4) = 0.982013790037908
+    ReLU,       // f(x) = if x > 0 { x } else { 0.0 };                          f(1) = 1.0
+    LReLU,      // f(x) = if x > 0 { x } else ( 0.1 * x );                      f(1) = 1.0
+    Tanh,       // f(x) = tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x)); tanh(2) = 0.964027580075817
 }
 
 impl ActivationFunction {
@@ -29,6 +27,27 @@ impl ActivationFunction {
             ActivationFunction::ReLU    => Self::relu(x),
             ActivationFunction::LReLU   => Self::lrelu(x),
             ActivationFunction::Tanh    => Self::tanh(x),
+        }
+    }
+
+    pub fn get_neutral_value(&self) -> f32 {
+        match self {
+            ActivationFunction::None    => 1.0,
+            ActivationFunction::Sigmoid => 4.0,     // Sigmoid(4.0) = 0.982013790037908
+            ActivationFunction::ReLU    => 1.0,
+            ActivationFunction::LReLU   => 1.0,
+            ActivationFunction::Tanh    => 2.37,    // tanh(2.37) = 0.982674112430374
+        }
+    }
+
+    pub fn choose_random() -> Self {
+        match thread_rng().gen_range(0..5) {
+            0 => ActivationFunction::None,
+            1 => ActivationFunction::Sigmoid,
+            2 => ActivationFunction::ReLU,
+            3 => ActivationFunction::LReLU,
+            4 => ActivationFunction::Tanh,
+            _ => panic!("Unexpected choice for choose_random()")
         }
     }
 }
@@ -61,10 +80,10 @@ pub struct NodeId(usize);
 #[derive(Debug)]
 pub struct Node {
     pub activation_function: ActivationFunction,
-    pub layer: Cell<Layer>,
+    pub layer: Layer,
     pub id: NodeId,
-    input_connections: Vec<Rc<Connection>>,
-    pub value: Cell<f32>,
+    input_connections: Vec<ConnectionId>,
+    pub value: f32,
 }
 
 impl Node {
@@ -93,8 +112,8 @@ pub struct ConnectionId(usize);
 
 #[derive(Debug)]
 pub struct Connection {
-    pub input_node: Rc<Node>,
-    pub output_node: Rc<Node>,
+    pub input_node:  NodeId,
+    pub output_node: NodeId,
     pub weight: f32,
     pub is_enabled: bool,
     pub id: ConnectionId,
@@ -102,95 +121,80 @@ pub struct Connection {
 
 #[derive(Debug)]
 pub struct Net {
-    nodes: Vec<Rc<Node>>,
-    connections: Vec<Rc<Connection>>,
+    nodes: HashMap<NodeId, Node>,
+    connections: HashMap<ConnectionId, Connection>,
     fitness: f32,
     input_count: usize,
     output_count: usize,
     is_evaluation_order_up_to_date: bool,
-    node_order_list: Vec<Rc<Node>>,
-    map_node_id_to_node: HashMap<NodeId, Rc<Node>>,
-    map_connection_id_to_connection: HashMap<ConnectionId, Rc<Connection>>,
-    //node_values: Vec<f32>,  // For evaluate()
+    node_order_list: Vec<NodeId>,
 }
 
 impl Net {
     pub fn new(population: &mut Population, input_count: usize, output_count: usize) -> Self {
-        let mut nodes = Vec::<Rc<Node>>::with_capacity(input_count + output_count);
-        let mut map_node_id_to_node = HashMap::<NodeId, Rc<Node>>::with_capacity(input_count + output_count);
+        let mut nodes = HashMap::<NodeId, Node>::with_capacity(input_count + output_count);
         for i in 0..input_count { 
-            let node = Rc::new(Node {
+            let node = Node {
                 activation_function: ActivationFunction::Sigmoid,
-                layer: Cell::new(Layer::Input),
+                layer: Layer::Input,
                 id: population.new_node_id(),
-                input_connections: Vec::<Rc<Connection>>::new(),
-                value: Cell::new(0.0),
-            });
-            nodes.push(node.clone());
-            map_node_id_to_node.insert(node.id, node);
+                input_connections: Vec::new(),
+                value: 0.0,
+            };
+            nodes.insert(node.id, node);
         }
         for i in 0..output_count {
-            let node = Rc::new(Node {
+            let node = Node {
                 activation_function: ActivationFunction::Sigmoid,
-                layer: Cell::new(Layer::Output),
+                layer: Layer::Output,
                 id: population.new_node_id(),
-                input_connections: Vec::<Rc<Connection>>::new(),
-                value: Cell::new(0.0),
-            });
-            nodes.push(node.clone());
-            map_node_id_to_node.insert(node.id, node);
+                input_connections: Vec::new(),
+                value: 0.0,
+            };
+            nodes.insert(node.id, node);
         }
 
         Self {
             nodes,
-            connections: Vec::<Rc<Connection>>::with_capacity(input_count * output_count),
+            connections: HashMap::with_capacity(input_count * output_count),
             fitness: f32::MIN,
             input_count,
             output_count,
             is_evaluation_order_up_to_date: false,
-            node_order_list: Vec::<Rc<Node>>::new(),
-            //node_values: Vec::<f32>::new(),
-            map_node_id_to_node,
-            map_connection_id_to_connection: HashMap::new(),
+            node_order_list: Vec::new(),
         }
     }
-
-    //fn input_range( &self) -> Range<usize> { 0..self.input_count }
-    //fn hidden_range(&self) -> Range<usize> { self.input_count..(self.nodes.len() - self.output_count) }
-    //fn output_range(&self) -> Range<usize> { (self.nodes.len() - self.output_count)..self.nodes.len() }
-    //fn input_and_hidden_range( &self) -> Range<usize> { 0..(self.nodes.len() - self.output_count) }
-    //fn hidden_and_output_range(&self) -> Range<usize> { self.input_count..self.nodes.len() }
 
     // NOTE: If we recursively traverse the network *once*, we can build the order that the network
     // needs to be evaluated in!  Then, to evaluate, we simply linearly replay the eval list--no
     // recursion or "node_has_been_evaluated" logic needed!
     fn build_evaluation_order(&mut self) {
         if self.is_evaluation_order_up_to_date { return; }
-        let mut node_has_been_evaluated = HashSet::<Rc<Node>>::with_capacity(self.nodes.len());
-        let mut node_order_list = Vec::<Rc<Node>>::with_capacity(self.nodes.len());
-        let mut layer_list = HashMap::<Rc<Node>, u16>::with_capacity(self.nodes.len());
+        let mut node_has_been_evaluated = HashSet::<NodeId>::with_capacity(self.nodes.len());
+        let mut node_order_list = Vec::<NodeId>::with_capacity(self.nodes.len());
+        let mut layer_list = HashMap::<NodeId, u16>::with_capacity(self.nodes.len());
 
         // Initialize inputs to layer 0
-        for n in self.nodes.iter() {
-            if n.layer.get() == Layer::Input {
-                layer_list.insert(n.clone(), 0);
+        for (id, node) in self.nodes.iter() {
+            if node.layer == Layer::Input {
+                layer_list.insert(node.id, 0);
             }
         }
 
         // Figure out the order to compute nodes and what layer the nodes belong to.
-        for node in self.nodes.iter().filter(|n| n.layer.get() == Layer::Output) {
-            Self::build_evaluation_order_recurse(&mut node_order_list, &mut node_has_been_evaluated, node);
-            Self::build_layer_order_recurse(&mut layer_list, node);
+        for &node_id in self.nodes.iter().filter_map(|(id, n)| if n.layer == Layer::Output { Some(id) } else { None }) {
+            self.build_evaluation_order_recurse(&mut node_order_list, &mut node_has_been_evaluated, node_id);
+            self.build_layer_order_recurse(&mut layer_list, node_id);
         }
 
         // Copy layer number to nodes.layer from layer_list[node_index], fixing the output layers,
         // which, by convention, the output layer nodes are all the highest-valued layer.
-        for node in self.nodes.iter_mut() {
-            let layer = layer_list[node];
-            match node.layer.get() {
+        for (&node_id, node) in self.nodes.iter_mut() {
+            let layer = layer_list[&node.id];
+            match node.layer {
                 Layer::Input => assert_eq!(layer, 0),
                 Layer::Output => assert!(layer > 0),
-                _ => node.layer.set(Layer::Hidden(layer)),
+                _ => node.layer = Layer::Hidden(layer),
             }
         }
         drop(layer_list);
@@ -203,29 +207,31 @@ impl Net {
     // of all required inputs for each output node.  Note that the last output_count nodes 
     // are the output nodes, so we only have to evalute them.  Thus, we might skip computation
     // of nodes that don't (eventually) connect to any output.
-    fn build_evaluation_order_recurse(node_order_list: &mut Vec<Rc<Node>>, node_has_been_evaluated: &mut HashSet<Rc<Node>>, node: &Rc<Node>) {
-        if node_has_been_evaluated.contains(node) { return; /* No work to do! Already evaluated! */ }
-        for connection in node.input_connections.iter() {
-            assert_eq!(node.id, connection.output_node.id);
+    fn build_evaluation_order_recurse(&self, node_order_list: &mut Vec<NodeId>, node_has_been_evaluated: &mut HashSet<NodeId>, node_id: NodeId) {
+        if node_has_been_evaluated.contains(&node_id) { return; /* No work to do! Already evaluated! */ }
+        for connection_id in self.nodes.get(&node_id).unwrap().input_connections.iter() {
+            let connection = self.connections.get(connection_id).unwrap();
+            assert_eq!(node_id, connection.output_node);
             if !connection.is_enabled { continue; }     // Treat disabled connections as not being connected (i.e. do this check here rather than in evaluate()!)
             if !node_has_been_evaluated.contains(&connection.input_node) {
-                Self::build_evaluation_order_recurse(node_order_list, node_has_been_evaluated, &connection.input_node);
+                self.build_evaluation_order_recurse(node_order_list, node_has_been_evaluated, connection.input_node);
             }
         }
-        node_order_list.push(node.clone());
-        node_has_been_evaluated.insert(node.clone());
+        node_order_list.push(node_id);
+        node_has_been_evaluated.insert(node_id);
     }
 
-    fn build_layer_order_recurse(layer_list: &mut HashMap<Rc<Node>, u16>, node: &Rc<Node>) -> u16 {
-        if layer_list.contains_key(node) { return layer_list[node]; /* No work to do! Already computed! */ }
+    fn build_layer_order_recurse(&self, layer_list: &mut HashMap<NodeId, u16>, node_id: NodeId) -> u16 {
+        if layer_list.contains_key(&node_id) { return layer_list[&node_id]; /* No work to do! Already computed! */ }
         let mut layer = 0;
-        for connection in node.input_connections.iter() {
-            assert_eq!(node.id, connection.output_node.id);
+        for connection_id in self.nodes.get(&node_id).unwrap().input_connections.iter() {
+            let connection = self.connections.get(connection_id).unwrap();
+            assert_eq!(node_id, connection.output_node);
             if !layer_list.contains_key(&connection.input_node) {
-                layer = layer.max(1 + Self::build_layer_order_recurse(layer_list, &connection.input_node));
+                layer = layer.max(1 + self.build_layer_order_recurse(layer_list, connection.input_node));
             }
         }
-        layer_list.insert(node.clone(), layer);
+        layer_list.insert(node_id, layer);
         layer
     }
 
@@ -237,12 +243,17 @@ impl Net {
         // We have already computed a correct order in which to evaluate nodes, and the caller
         // has filled in the self.node_values for all input nodes, so we now visit nodes in 
         // order and evaluate them.
-        for node in self.node_order_list.iter() {
-            let inputs_sum = node.input_connections.iter()
-                .map(|connection| connection.input_node.value.get() * connection.weight)
+        for &node_id in self.node_order_list.iter() {
+            let inputs_sum = self.nodes.get(&node_id).unwrap().input_connections.iter()
+                .map(|connection_id| {
+                    let connection = self.connections.get(connection_id).unwrap();
+                    self.nodes.get(&connection.input_node).unwrap().value * connection.weight
+                })
                 .sum();
-
-            node.value.set(node.apply_activation_function(inputs_sum));
+            {
+                let node = self.nodes.get_mut(&node_id).unwrap();
+                node.value = node.apply_activation_function(inputs_sum);
+            }
         }
     }
 
@@ -256,47 +267,40 @@ impl Net {
         };
 
         // Copy the common nodes randomly from either parent.  Also, copy the disjoint nodes only from the winner.
-        let nodes_child: Vec<Rc<Node>> = winner.nodes.iter().map(|node_winner| {
-            let node_to_clone = match loser.map_node_id_to_node.get(&node_winner.id) {
+        let nodes_child: HashMap<NodeId, Node> = winner.nodes.iter().map(|(&node_id_winner, node_winner)| {
+            let node_to_clone = match loser.nodes.get(&node_id_winner) {
                 None => node_winner,
                 Some(node_loser) => if thread_rng().gen_bool(0.5) { node_winner } else { node_loser },
             };
-            let node_child = Rc::new(Node { 
+            let node_child = Node { 
                 activation_function: node_to_clone.activation_function, 
-                layer: node_to_clone.layer.clone(), 
+                layer: node_to_clone.layer, 
                 id: node_to_clone.id, 
                 input_connections: Vec::new(),  
-                value: node_to_clone.value.clone(), 
-            });
-            node_child
+                value: node_to_clone.value, 
+            };
+            (node_child.id, node_child)
         }).collect();
-        let map_node_id_to_node: HashMap<NodeId, Rc<Node>> = nodes_child.iter().map(|node| (node.id, node.clone())).collect();
 
         // Copy the common connections randomly from either parent, BUT always set the is_enabled to the value
         // from the winner.  Also, copy the disjoint connections only from the winner.
-        let connections_child: Vec<Rc<Connection>> = winner.connections.iter().map(|connection_winner| {
-            let connection_to_clone = match loser.map_connection_id_to_connection.get(&connection_winner.id) {
+        let connections_child: HashMap<ConnectionId, Connection> = winner.connections.iter().map(|(&connection_id_winner, connection_winner)| {
+            let connection_to_clone = match loser.connections.get(&connection_id_winner) {
                 None => connection_winner,
                 Some(connection_loser) => if thread_rng().gen_bool(0.5) { connection_winner } else { connection_loser },
             };
-            let connection_child = Rc::new(Connection {
+            let connection_child = Connection {
                 id: connection_to_clone.id,
                 weight: connection_to_clone.weight,
                 is_enabled: connection_winner.is_enabled,
                 // Replace input_node and output_node, which point to a parent node, with a reference 
                 // to the corresponding child node.
-                input_node:  map_node_id_to_node.get(&connection_to_clone.input_node.id ).unwrap().clone(),
-                output_node: map_node_id_to_node.get(&connection_to_clone.output_node.id).unwrap().clone(),
-            });
+                input_node:  connection_to_clone.input_node,
+                output_node: connection_to_clone.output_node,
+            };
             // Make sure we are using nodes from the child's Net, not one of the parents'
-            assert!(!Rc::ptr_eq(&connection_child.input_node,  &connection_to_clone.input_node ));
-            assert!(!Rc::ptr_eq(&connection_child.output_node, &connection_to_clone.output_node));
-            connection_child
+            (connection_child.id, connection_child)
         }).collect();
-        let map_connection_id_to_connection: HashMap<ConnectionId, Rc<Connection>> = 
-            connections_child.iter()
-                .map(|connection| (connection.id, connection.clone()))
-                .collect();
 
         let net_child = Self {
             nodes: nodes_child,
@@ -306,9 +310,6 @@ impl Net {
             output_count: winner.output_count,
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
-            //node_values: Vec::new(),
-            map_node_id_to_node,
-            map_connection_id_to_connection,
         };
 
         // Let's verify we got everything correct
@@ -323,89 +324,190 @@ impl Net {
 
         // NOTE: Must keep struct invariants intact:
 
-        // 1. All Rc<Node> references in Connection::input_node, and Connection::output_node must
-        // refer to valid nodes from the same Net::nodes collection...
-        assert!(self.connections.iter().all(|c| self.nodes.iter().any(|n| Rc::ptr_eq(n, &c.input_node))));
-        assert!(self.connections.iter().all(|c| self.nodes.iter().any(|n| Rc::ptr_eq(n, &c.output_node))));
-        // ...and all Node::input_connections refer to Rc<Connection> found in the same 
+        // 1. All hash keys map to correct entity
+        assert!(self.nodes.iter().all(|(&id, n)| n.id == id));
+        assert!(self.connections.iter().all(|(&id, c)| c.id == id));
+
+        // 2a. All node_ids in Connection::input_node, and Connection::output_node must
+        // refer to valid nodes from the same Net::nodes collection.
+        assert!(self.connections.values().all(|c| self.nodes.contains_key(&c.input_node)));
+        assert!(self.connections.values().all(|c| self.nodes.contains_key(&c.output_node)));
+        // 2b. And all Node::input_connections refer to ConnectionIds found in the same 
         // Net's Net::connections collection.
-        assert!(self.nodes.iter().all(|n| 
-            n.input_connections.iter().all(|c1| 
-                self.connections.iter().any(|c2| Rc::ptr_eq(c1, c2)))));
-
-
-        // 2. All innovation_id values in Net::nodes must be unique
-        assert_eq!({
-            let hash_set: HashSet<NodeId> = self.nodes.iter().map(|n| n.id).collect();
-            hash_set.len()
-        }, node_count);
-
-        // 3. All innovation_id values in Net::connections must be unique
-        assert_eq!({
-            let hash_set: HashSet<ConnectionId> = self.connections.iter().map(|c| c.id).collect();
-            hash_set.len()
-        }, connection_count);
+        assert!(self.nodes.values().all(|n| 
+            n.input_connections.iter().all(|c| self.connections.contains_key(c)))); 
 
         // 5. Nodes are in proper layers
-        assert!(self.nodes.iter().all(|n| 
-            n.input_connections.iter().all(|c| c.input_node.layer.get().comes_before(n.layer.get()))));
+        assert!(self.nodes.values().all(|n| 
+            n.input_connections.iter().all(|c| {
+                let connection = self.connections.get(c).unwrap();
+                let input_node = self.nodes.get(&connection.input_node).unwrap();
+                input_node.layer.comes_before(n.layer)
+            })
+        ));
 
         // 6. Each connection is from a lower-numbered layer to a higher-numbered layer
-        assert!(self.connections.iter().all(|c| c.input_node.layer.get().comes_before(c.output_node.layer.get())));
-
-        // 7. For the new net, is_evaluation_order_up_to_date is false
-        assert!(!self.is_evaluation_order_up_to_date);
+        assert!(self.connections.values().all(|c| {
+            let input_node  = self.nodes.get(&c.input_node ).unwrap();
+            let output_node = self.nodes.get(&c.output_node).unwrap();
+            input_node.layer.comes_before(output_node.layer)
+        }));
     }
 
-    pub fn mutate_self(&mut self, 
-        prob_mutate_activation_function_of_node: f64,
-        prob_add_connection: f64, 
-        prob_remove_conneciton: f64, 
-        prob_toggle_enabled: f64, 
-        prob_change_weight: f64,
-        max_weight_change_magnitude: f64,
-        prob_remove_node: f64,
-        prob_add_node: f64, 
+    fn choose_id<T:Copy>(id_list: &[T]) -> T {
+        let i = thread_rng().gen_range(0..id_list.len());
+        id_list[i]
+    }
+
+    fn choose_id_not<T:Copy+PartialEq>(id_list: &[T], not: T) -> T {
+        for _ in 0..20 {
+            let i = thread_rng().gen_range(0..id_list.len());
+            let id = id_list[i];
+            if id != not { return id; }
+        }
+        panic!("Unable to find item: choose_id_cond()")
+    }
+
+
+    pub fn mutate_self(&mut self,
+        population: &mut Population,  
+        prob_mutate_activation_function_of_node: f64,   // done
+        prob_mutate_weight: f64,                        // done
+        max_weight_change_magnitude: f32,               // done
+        prob_toggle_enabled: f64,                       // done
+        prob_remove_connection: f64,                    // done
+        prob_add_connection: f64,                       // done
+        prob_remove_node: f64,                          // TODO!!!
+        prob_add_node: f64,                             // TODO!!!
     ) {
+        let node_id_list      = self.nodes.keys().copied().collect::<Vec<NodeId>>();
+        let input_and_hidden  = self.nodes.keys().filter_map(|id| if self.nodes.get(id).unwrap().layer != Layer::Output { Some(*id) } else { None }).collect::<Vec<NodeId>>();
+        let hidden_and_output = self.nodes.keys().filter_map(|id| if self.nodes.get(id).unwrap().layer != Layer::Input  { Some(*id) } else { None }).collect::<Vec<NodeId>>();
+
+        // Change node's activation function
         if thread_rng().gen_bool(prob_mutate_activation_function_of_node) {
-            let i_node_mutate = thread_rng().gen_range(0..self.nodes.len());
-            let node_mutate = self.nodes[i_node_mutate].clone();
-            if node_mutate.layer.get() != Layer::Input {
-                //node_mutate.activation_function = match thread_rng().gen_range(0..5) {
-                //    0 => ActivationFunction::None,
-                //    1 => ActivationFunction::Sigmoid,
-                //    2 => ActivationFunction::ReLU,
-                //    3 => ActivationFunction::LReLU,
-                //    4 => ActivationFunction::Tanh,
-                //    _ => panic!(),
-                //};
-                todo!();
-            }
+            let node_mutate = self.nodes.get_mut(&Self::choose_id(&node_id_list)).unwrap();
+            if node_mutate.layer != Layer::Input { node_mutate.activation_function = ActivationFunction::choose_random(); }
         }
 
+        // Change a connection's weight
+        let connection_id_list = self.connections.keys().copied().collect::<Vec<ConnectionId>>();
+        if thread_rng().gen_bool(prob_mutate_weight) {
+            let connection_mutate = self.connections.get_mut(&Self::choose_id(&connection_id_list)).unwrap();
+            connection_mutate.weight += (thread_rng().gen::<f32>() * 2.0 - 1.0) * max_weight_change_magnitude;
+        }
 
+        // Toggle a conneciton's is_enabled
+        if thread_rng().gen_bool(prob_toggle_enabled) {
+            let connection_mutate = self.connections.get_mut(&Self::choose_id(&connection_id_list)).unwrap();
+            connection_mutate.is_enabled = !connection_mutate.is_enabled;
+        }
+
+        // Remove a connection
+        if thread_rng().gen_bool(prob_remove_connection) {
+            let id_connection_remove = Self::choose_id(&connection_id_list);
+            let connection_remove = self.connections.remove(&id_connection_remove).unwrap();
+            // Since we're removing a connection, the connection's output node will have a list 
+            // of incoming connections--we must remove this connection from that collection.
+            let node_output = self.nodes.get_mut(&connection_remove.output_node).unwrap();
+            node_output.input_connections.retain(|&id_c| id_c != id_connection_remove);
+            // NOTE: We do NOT update connection_id_list!!!
+        }
+
+        // Add a connection
         if thread_rng().gen_bool(prob_add_connection) {
-            for _ in 0..10 {
-                // Select a "from" node that is NOT an Output node
-                let node_from = self.nodes[thread_rng().gen_range(0..self.nodes.len())].clone();
-                if node_from.layer.get() == Layer::Output { continue; }
-
-                // Select a "to" node that is NOT an Input node
-                let node_to = self.nodes[thread_rng().gen_range(0..self.nodes.len())].clone();
-                if node_to.layer.get() == Layer::Input { continue; }
-                
-                // Make sure
-                if node_from.layer.get().to_number() > node_to.layer.get().to_number() { continue; }
-                
+            let mut id_from = Self::choose_id(&input_and_hidden);
+            let mut id_to   = Self::choose_id_not(&hidden_and_output, id_from);
+            let from = self.nodes.get(&id_from).unwrap();
+            let to   = self.nodes.get(&id_to  ).unwrap();
+            // If we chose a "from" that comes before a "to", simply swap them
+            if let Layer::Hidden(l_from) = from.layer {
+                if let Layer::Hidden(l_to) = to.layer { 
+                    if to.layer.comes_before(from.layer) { std::mem::swap(&mut id_from, &mut id_to); }
+                }
             }
+            // Make sure either "from" comes before "to", or that they are both in the exact same
+            // hidden layer.
+            assert!({
+                let l_from = self.nodes.get(&id_from).unwrap().layer;
+                let l_to   = self.nodes.get(&id_to).unwrap().layer;
+                l_from.comes_before(l_to) || (
+                    match (l_from, l_to) {
+                        (Layer::Hidden(i), Layer::Hidden(j)) => i == j,
+                        _ => false,
+                    }
+                )
+            });
+            let connnection_new = Connection {
+                id: population.new_connection_id(),
+                is_enabled: true,
+                weight: thread_rng().gen::<f32>() * 2.0 - 1.0,
+                input_node: id_from,
+                output_node: id_to,
+            };
+            assert!(!self.connections.contains_key(&connnection_new.id));
+            // Since we added a new connection, we must also add this connection to the 
+            // output node's input collection.
+            let to = self.nodes.get_mut(&id_to).unwrap();
+            to.input_connections.push(connnection_new.id);
+            self.connections.insert(connnection_new.id, connnection_new);
+        }
+        // NOTE!!! From this point on, layer numbers might not be accurate... we might have
+        // made a new connection between two nodes in the same hidden layer
+
+        // Add node
+        if thread_rng().gen_bool(prob_add_node) {
+            // Choose a random Connection, and split it into two, inserting the new node inbetween 
+            // and setting old.is_enabled = false
+            let connection_old = self.connections.get_mut(&Self::choose_id(&connection_id_list)).unwrap();
+            connection_old.is_enabled = false;
+            let [node_input, node_output] = self.nodes.get_many_mut([&connection_old.input_node, &connection_old.output_node]).unwrap();
+            let activation_function = node_output.activation_function;
+            let mut node_new = Node {
+                activation_function,
+                id: population.new_node_id(),
+                input_connections: Vec::new(),
+                layer: Layer::Hidden(1),    // This will be correctly computed later
+                value: 0.0,
+            };
+            let connection_new_a = Connection {
+                id: population.new_connection_id(),
+                input_node: node_input.id,
+                output_node: node_new.id,
+                is_enabled: true,
+                weight: connection_old.weight,
+            };
+            let connection_new_b = Connection {
+                id: population.new_connection_id(),
+                input_node: node_new.id,
+                output_node: node_output.id,
+                is_enabled: true,
+                weight: activation_function.get_neutral_value(),
+            };
+            node_new.input_connections.push(connection_new_a.id);
+            node_output.input_connections.push(connection_new_b.id);
+            self.connections.insert(connection_new_a.id, connection_new_a);
+            self.connections.insert(connection_new_b.id, connection_new_b);
+            self.nodes.insert(node_new.id, node_new);
         }
 
+        // Remove node
+        if thread_rng().gen_bool(prob_remove_node) {
+            let hidden = self.nodes.keys().filter_map(|id| if let Layer::Hidden(_) = self.nodes.get(id).unwrap().layer { Some(*id) } else { None }).collect::<Vec<NodeId>>();
+            let id_node_remove = Self::choose_id(&hidden);
+            self.nodes.retain(|&id, n| id != id_node_remove);
+            // Now find nodes who have an input_connection from this removed node--remove that
+            // input_connection.  Note we don't have to worry about output_connection, since 
+            // that points to the node we've already removed.
+            for n in self.nodes.values_mut() {
+                n.input_connections.retain(|id_c| self.connections.get(id_c).unwrap().input_node != id_node_remove);
+            }
+            // Finally, remove any connections mentioning the removed node
+            self.connections.retain(|&id, c| c.input_node != id_node_remove && c.output_node != id_node_remove);
+        }
 
-        // Add or remove a connection (update all node.input_connections vector as needed)
-        // Enable or diable a connection
-        // Add or remove a hidden layer node
-        // If modifications made, make sure is_evaluation_order_up_to_date is false
-
+        self.is_evaluation_order_up_to_date = false;
+        self.build_evaluation_order();
         self.verify_invariants();
     }
 }

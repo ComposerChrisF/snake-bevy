@@ -1,123 +1,9 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
 
 use bevy::utils::hashbrown::{HashMap, HashSet};
 use rand::{thread_rng, Rng};
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum ActivationFunction {
-    None,       // f(x) = x, i.e. Linear
-    Sigmoid,    // f(x) = 1.0 / (1.0 + exp(-x));                                f(4) = 0.982013790037908
-    ReLU,       // f(x) = if x > 0 { x } else { 0.0 };                          f(1) = 1.0
-    LReLU,      // f(x) = if x > 0 { x } else ( 0.1 * x );                      f(1) = 1.0
-    Tanh,       // f(x) = tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x)); tanh(2) = 0.964027580075817
-}
+use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::Population};
 
-impl ActivationFunction {
-    pub fn linear( x: f32) -> f32 { x }
-    pub fn sigmoid(x: f32) -> f32 { 1.0 / (1.0 + (-x).exp()) }
-    pub fn relu(   x: f32) -> f32 { if x > 0.0 { x } else { 0.0 } }
-    pub fn lrelu(  x: f32) -> f32 { if x >= 0.0 { x } else { 0.1 * x } }
-    pub fn tanh(   x: f32) -> f32 { x.tanh() }
-
-    pub fn apply(&self, x: f32) -> f32 {
-        match self {
-            ActivationFunction::None    => Self::linear(x),
-            ActivationFunction::Sigmoid => Self::sigmoid(x),
-            ActivationFunction::ReLU    => Self::relu(x),
-            ActivationFunction::LReLU   => Self::lrelu(x),
-            ActivationFunction::Tanh    => Self::tanh(x),
-        }
-    }
-
-    pub fn get_neutral_value(&self) -> f32 {
-        match self {
-            ActivationFunction::None    => 1.0,
-            ActivationFunction::Sigmoid => 4.0,     // Sigmoid(4.0) = 0.982013790037908
-            ActivationFunction::ReLU    => 1.0,
-            ActivationFunction::LReLU   => 1.0,
-            ActivationFunction::Tanh    => 2.37,    // tanh(2.37) = 0.982674112430374
-        }
-    }
-
-    pub fn choose_random() -> Self {
-        match thread_rng().gen_range(0..5) {
-            0 => ActivationFunction::None,
-            1 => ActivationFunction::Sigmoid,
-            2 => ActivationFunction::ReLU,
-            3 => ActivationFunction::LReLU,
-            4 => ActivationFunction::Tanh,
-            _ => panic!("Unexpected choice for choose_random()")
-        }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Layer {
-    Input,
-    Hidden(u16),
-    Output,
-}
-
-impl Layer {
-    pub fn to_number(self) -> usize {
-        match self {
-            Layer::Input     => 0,
-            Layer::Hidden(i) => i as usize + 1,
-            Layer::Output    => u16::MAX as usize + 1,
-        }
-    }
-
-    pub fn comes_before(self, other: Layer) -> bool {
-        self.to_number() < other.to_number()
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
-pub struct NodeId(usize);
-
-
-#[derive(Debug)]
-pub struct Node {
-    pub activation_function: ActivationFunction,
-    pub layer: Layer,
-    pub id: NodeId,
-    input_connections: Vec<ConnectionId>,
-    pub value: f32,
-}
-
-impl Node {
-    fn apply_activation_function(&self, input_sum: f32) -> f32 {
-        // NOTE: Traditional "bias" of a node is accomplished by having one of the input nodes 
-        // always having a value of 1.0, thus the connection weight creates a bias.
-        self.activation_function.apply(input_sum)
-    }
-}
-
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-impl Eq for Node {}
-impl std::hash::Hash for Node {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.0.hash(state);
-    }
-}
-
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
-pub struct ConnectionId(usize);
-
-#[derive(Debug)]
-pub struct Connection {
-    pub input_node:  NodeId,
-    pub output_node: NodeId,
-    pub weight: f32,
-    pub is_enabled: bool,
-    pub id: ConnectionId,
-}
 
 #[derive(Debug)]
 pub struct Net {
@@ -137,7 +23,7 @@ impl Net {
             let node = Node {
                 activation_function: ActivationFunction::Sigmoid,
                 layer: Layer::Input,
-                id: population.new_node_id(),
+                id: NodeId::new_unique(),
                 input_connections: Vec::new(),
                 value: 0.0,
             };
@@ -147,7 +33,7 @@ impl Net {
             let node = Node {
                 activation_function: ActivationFunction::Sigmoid,
                 layer: Layer::Output,
-                id: population.new_node_id(),
+                id: NodeId::new_unique(),
                 input_connections: Vec::new(),
                 value: 0.0,
             };
@@ -439,7 +325,7 @@ impl Net {
                 )
             });
             let connnection_new = Connection {
-                id: population.new_connection_id(),
+                id: ConnectionId::new_unique(),
                 is_enabled: true,
                 weight: thread_rng().gen::<f32>() * 2.0 - 1.0,
                 input_node: id_from,
@@ -465,20 +351,20 @@ impl Net {
             let activation_function = node_output.activation_function;
             let mut node_new = Node {
                 activation_function,
-                id: population.new_node_id(),
+                id: NodeId::new_unique(),
                 input_connections: Vec::new(),
                 layer: Layer::Hidden(1),    // This will be correctly computed later
                 value: 0.0,
             };
             let connection_new_a = Connection {
-                id: population.new_connection_id(),
+                id: ConnectionId::new_unique(),
                 input_node: node_input.id,
                 output_node: node_new.id,
                 is_enabled: true,
                 weight: connection_old.weight,
             };
             let connection_new_b = Connection {
-                id: population.new_connection_id(),
+                id: ConnectionId::new_unique(),
                 input_node: node_new.id,
                 output_node: node_output.id,
                 is_enabled: true,
@@ -509,35 +395,5 @@ impl Net {
         self.is_evaluation_order_up_to_date = false;
         self.build_evaluation_order();
         self.verify_invariants();
-    }
-}
-
-pub struct Population {
-    pub nets: Vec<Net>,
-    gene_id_max: usize,
-    innovation_id_max: usize,
-}
-
-impl Population {
-    pub fn new() -> Self {
-        Self {
-            nets: Vec::<Net>::new(),
-            gene_id_max: 1,
-            innovation_id_max: 1,
-        }
-    }
-
-    pub fn new_node_id(&mut self) -> NodeId {
-        self.gene_id_max += 1;
-        NodeId(self.gene_id_max)
-    }
-
-    pub fn new_connection_id(&mut self) -> ConnectionId {
-        self.innovation_id_max += 1;
-        ConnectionId(self.innovation_id_max)
-    }
-
-    pub fn create_next_generation(&self) -> Population {
-        todo!()
     }
 }

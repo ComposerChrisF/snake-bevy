@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::nodes::NodeId;
+use super::nets::{ConnectionIndex, NodeIndex};
 
 
 static CONNECTION_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
@@ -18,10 +18,11 @@ impl ConnectionId {
 
 #[derive(Debug)]
 pub struct Connection {
-    pub input_node:  NodeId,
-    pub output_node: NodeId,
+    pub index: ConnectionIndex,
+    pub id: ConnectionId,
+    pub input_node:  NodeIndex,
+    pub output_node: NodeIndex,
     pub weight: f32,
     pub is_enabled: bool,
-    pub id: ConnectionId,
 }
 

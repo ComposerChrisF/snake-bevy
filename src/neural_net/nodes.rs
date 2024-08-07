@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use super::{activation_functions::ActivationFunction, connections::ConnectionId, layers::Layer};
+use super::{activation_functions::ActivationFunction, layers::Layer, nets::{ConnectionIndex, NodeIndex}};
 
 
 
@@ -18,10 +18,11 @@ impl NodeId {
 
 #[derive(Debug)]
 pub struct Node {
+    pub index: NodeIndex,
+    pub id: NodeId,
     pub activation_function: ActivationFunction,
     pub layer: Layer,
-    pub id: NodeId,
-    pub(super) input_connections: Vec<ConnectionId>,
+    pub(super) input_connections: Vec<ConnectionIndex>,
     pub value: f32,
 }
 
@@ -35,12 +36,12 @@ impl Node {
 
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.index == other.index
     }
 }
 impl Eq for Node {}
 impl std::hash::Hash for Node {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.0.hash(state);
+        self.index.hash(state);
     }
 }

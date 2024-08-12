@@ -1,11 +1,11 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
 
 use super::nets::{ConnectionIndex, NodeIndex};
 
 
 static CONNECTION_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectionId(usize);
 
 impl ConnectionId {
@@ -14,6 +14,16 @@ impl ConnectionId {
     }
 }
 
+impl fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConnectionId({})", self.0)
+    }
+}
+impl fmt::Debug for ConnectionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConnectionId({})", self.0)
+    }
+}
 
 
 #[derive(Debug)]

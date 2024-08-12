@@ -1,17 +1,24 @@
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
 use bevy::utils::hashbrown::HashMap;
 use rand::{thread_rng, Rng, prelude::SliceRandom};
 
 use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}};
 
+fn is_none_or<T, U>(val: Option<T>, f: U) -> bool 
+    where T: Sized, U: FnOnce(T) -> bool {
+    match val {
+        None => true,
+        Some(v) => f(v),
+    }
+}
 
 
 static NET_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
 /// The NetId uniquely identifies an instance of a Net.  Used for debug checks to ensure node and
 /// connection indexes can only be used for the Net that generated them.
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NetId(usize);
 
 impl NetId {
@@ -20,15 +27,50 @@ impl NetId {
     }
 }
 
+impl fmt::Display for NetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NetId({})", self.0)
+    }
+}
+impl fmt::Debug for NetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NetId({})", self.0)
+    }
+}
 
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NodeIndex(NetId, usize);
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+impl fmt::Display for NodeIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NodeIndex({},{})", self.0, self.1)
+    }
+}
+impl fmt::Debug for NodeIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NodeIndex({},{})", self.0, self.1)
+    }
+}
+
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectionIndex(NetId, usize);
 
+impl fmt::Display for ConnectionIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConnectionIndex({},{})", self.0, self.1)
+    }
+}
+impl fmt::Debug for ConnectionIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConnectionIndex({},{})", self.0, self.1)
+    }
+}
 
+
+#[derive(Clone, Debug)]
 pub struct MutationParams {
     prob_mutate_activation_function_of_node: f64,
     prob_mutate_weight: f64,
@@ -156,12 +198,21 @@ impl Net {
 
         // Copy layer number to nodes.layer from layer_list[node_index], fixing the output layers,
         // which, by convention, the output layer nodes are all the highest-valued layer.
+        //println!("{layer_list:?}");
         for node in self.nodes.iter_mut() {
-            let layer = layer_list[&node.index];
+            let layer = layer_list.get(&node.index);
             match node.layer {
-                Layer::Input => assert_eq!(layer, 0),
-                Layer::Output => assert!(layer > 0),
-                _ => node.layer = Layer::Hidden(layer),
+                Layer::Input => assert!(is_none_or(layer, |&layer| layer == 0)),
+                Layer::Output => {
+                    //println!("assert: layer={layer}, conn_count={}", node.input_connections.len());
+                    assert!(is_none_or(layer, |&layer| layer > 0 || node.input_connections.len() == 0));
+                },
+                _ => node.layer = if let Some(&layer) = layer {
+                    //assert!(layer > 0);
+                    Layer::Hidden(layer)
+                } else {
+                    Layer::Unreachable
+                },
             }
         }
         drop(layer_list);
@@ -195,9 +246,7 @@ impl Net {
         for connection_index in self.get_node(node_index).input_connections.iter() {
             let connection = &self.connections[connection_index.1];
             assert_eq!(node_index, connection.output_node);
-            if !layer_list.contains_key(&connection.input_node) {
-                layer = layer.max(1 + self.build_layer_order_recurse(layer_list, connection.input_node));
-            }
+            layer = layer.max(1 + self.build_layer_order_recurse(layer_list, connection.input_node));
         }
         layer_list.insert(node_index, layer);
         layer
@@ -255,15 +304,17 @@ impl Net {
         let mut node_id_dont_copy: Option<NodeId> = None;
         if thread_rng().gen_bool(mut_params.prob_remove_node) {
             let hidden = winner.nodes.iter().filter_map(|n| if let Layer::Hidden(_) = n.layer { Some(n.id) } else { None }).collect::<Vec<_>>();
-            let &x = hidden.choose(&mut thread_rng()).unwrap();
-            node_id_dont_copy = Some(x);
+            if let Some(&x) = hidden.choose(&mut thread_rng()) {
+                node_id_dont_copy = Some(x);
+            }
         }
 
         // TODO: Remove a connection by selecting one NOT to copy!
         let mut connection_id_dont_copy: Option<ConnectionId> = None;
         if thread_rng().gen_bool(mut_params.prob_remove_connection) {
-            let x = winner.connections.choose(&mut thread_rng()).unwrap().id;
-            connection_id_dont_copy = Some(x);
+            if let Some(x) = winner.connections.choose(&mut thread_rng()) {
+                connection_id_dont_copy = Some(x.id);
+            }
         }
 
 
@@ -281,6 +332,7 @@ impl Net {
         // from the winner.  Also, copy the disjoint connections only from the winner.
         for connection_winner in winner.connections.iter() {
             if connection_id_dont_copy.is_some_and(|id| id == connection_winner.id) { continue; }
+            if node_id_dont_copy.is_some_and(|id| id == winner.get_node(connection_winner.input_node).id || id == winner.get_node(connection_winner.output_node).id) { continue; }
             let (net_of_clone, connection_to_clone) = match loser.map_connection_id_to_index.get(&connection_winner.id) {
                 None => (winner, connection_winner),
                 Some(connection_index_loser) => if thread_rng().gen_bool(0.5) { 
@@ -303,11 +355,14 @@ impl Net {
         // Let's verify we got everything correct
         self.verify_invariants();
 
+        //println!("NET: {net_child:#?}");
         net_child.mutate_self(mut_params);
         net_child
     }
 
     fn verify_invariants(&self) {
+        //println!("NET: {:?}", self); 
+
         let       node_count = self.nodes      .len();
         let connection_count = self.connections.len();
 
@@ -334,19 +389,26 @@ impl Net {
             n.input_connections.iter().all(|index| index.0 == self.id && index.1 < self.connections.len())));
 
         // 4. Nodes are in proper layers
-        assert!(self.nodes.iter().all(|n| 
+        assert!(!self.is_evaluation_order_up_to_date || self.nodes.iter().all(|n| 
             n.input_connections.iter().all(|&c_index| {
                 let connection = self.get_connection(c_index);
                 let input_node = self.get_node(connection.input_node);
-                input_node.layer.comes_before(n.layer)
+                let come_before_option = input_node.layer.comes_before(n.layer);
+                // input_node should come before n, unless one (or both) are
+                // Unreachable.
+                let should_be_true = come_before_option.unwrap_or(true);
+                if !should_be_true { println!("n={}, c_index={c_index}, input_node={}, input_node.layer={}, n.layer={}", n.index, connection.input_node, input_node.layer, n.layer)}
+                should_be_true
             })
         ));
 
         // 5. Each connection is from a lower-numbered layer to a higher-numbered layer
-        assert!(self.connections.iter().all(|c| {
+        assert!(!self.is_evaluation_order_up_to_date || self.connections.iter().all(|c| {
             let input_node  = self.get_node(c. input_node);
             let output_node = self.get_node(c.output_node);
-            input_node.layer.comes_before(output_node.layer)
+            // input_node must come before output_node, unless one of
+            // them is Unreachable, in which case None was returned.
+            input_node.layer.comes_before(output_node.layer).unwrap_or(true)
         }));
     }
 
@@ -371,26 +433,26 @@ impl Net {
         let hidden_and_output = self.nodes.iter().filter_map(|n| if n.layer != Layer::Input  { Some(n.index) } else { None }).collect::<Vec<_>>();
 
         // Change node's activation function
-        if thread_rng().gen_bool(mut_params.prob_mutate_activation_function_of_node) {
+        if thread_rng().gen_bool(mut_params.prob_mutate_activation_function_of_node) && node_index_list.len() > 0 {
             let node_mutate = self.get_node_mut(Self::choose_index(&node_index_list));
             if node_mutate.layer != Layer::Input { node_mutate.activation_function = ActivationFunction::choose_random(); }
         }
 
         // Change a connection's weight
         let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
-        if thread_rng().gen_bool(mut_params.prob_mutate_weight) {
+        if thread_rng().gen_bool(mut_params.prob_mutate_weight) && connection_index_list.len() > 0 {
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.weight += (thread_rng().gen::<f32>() * 2.0 - 1.0) * mut_params.max_weight_change_magnitude;
         }
 
         // Toggle a conneciton's is_enabled
-        if thread_rng().gen_bool(mut_params.prob_toggle_enabled) {
+        if thread_rng().gen_bool(mut_params.prob_toggle_enabled) && connection_index_list.len() > 0 {
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.is_enabled = !connection_mutate.is_enabled;
         }
 
         // Add a connection
-        if thread_rng().gen_bool(mut_params.prob_add_connection) {
+        if thread_rng().gen_bool(mut_params.prob_add_connection) && input_and_hidden.len() > 1 {
             let mut index_from = Self::choose_index(&input_and_hidden);
             let mut index_to   = Self::choose_index_not(&hidden_and_output, index_from);
             let from = self.get_node(index_from);
@@ -398,7 +460,7 @@ impl Net {
             // If we chose a "from" that comes before a "to", simply swap them
             if let Layer::Hidden(l_from) = from.layer {
                 if let Layer::Hidden(l_to) = to.layer { 
-                    if to.layer.comes_before(from.layer) { std::mem::swap(&mut index_from, &mut index_to); }
+                    if to.layer.comes_before(from.layer).unwrap() { std::mem::swap(&mut index_from, &mut index_to); }
                 }
             }
             // Make sure either "from" comes before "to", or that they are both in the exact same
@@ -406,7 +468,7 @@ impl Net {
             assert!({
                 let l_from = self.get_node(index_from).layer;
                 let l_to   = self.get_node(index_to).layer;
-                l_from.comes_before(l_to) || (
+                l_from.comes_before(l_to).unwrap() || (
                     match (l_from, l_to) {
                         (Layer::Hidden(i), Layer::Hidden(j)) => i == j,
                         _ => false,
@@ -431,7 +493,7 @@ impl Net {
         // made a new connection between two nodes in the same hidden layer
 
         // Add node
-        if thread_rng().gen_bool(mut_params.prob_add_node) {
+        if thread_rng().gen_bool(mut_params.prob_add_node) && connection_index_list.len() > 0 {
             // Choose a random Connection, and split it into two, inserting the new node inbetween 
             // and setting old.is_enabled = false
             let connection_index_old = Self::choose_index(&connection_index_list);
@@ -449,7 +511,178 @@ impl Net {
         }
 
         self.is_evaluation_order_up_to_date = false;
+        //println!("NET: {self:#?}");
         self.build_evaluation_order();
+        //println!("NET: {self:#?}");
         self.verify_invariants();
     }
+}
+
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_invariants_on_empty() {
+        let net = Net::new(7, 5);
+        net.verify_invariants();
+    }
+
+    #[test]
+    fn test_mutations_separately() {
+        let net = Net::new(10, 4);
+        net.verify_invariants();
+        let params = MutationParams {
+            prob_add_connection: 0.0,
+            prob_add_node: 0.0,
+            prob_mutate_activation_function_of_node: 0.0,
+            prob_mutate_weight: 0.0,
+            max_weight_change_magnitude: 0.0,
+            prob_toggle_enabled: 0.0,
+            prob_remove_connection: 0.0,
+            prob_remove_node: 0.0,
+        };
+        let mut param_add_connection = params.clone();  param_add_connection.prob_add_connection = 1.0;
+        let mut param_add_node       = params.clone();  param_add_node      .prob_add_node       = 1.0;
+        let mut param_toggle_enabled = params.clone();  param_toggle_enabled.prob_toggle_enabled = 1.0;
+        let mut param_mutate_weight  = params.clone();  param_mutate_weight .prob_mutate_weight  = 1.0;   param_mutate_weight.max_weight_change_magnitude = 5.0;
+        let mut param_mutate_af      = params.clone();  param_mutate_af     .prob_mutate_activation_function_of_node = 1.0;
+
+        let mut net = Net::new(10, 4);
+        net.mutate_self(&param_add_connection);
+
+        let mut net = Net::new(10, 4);
+        net.mutate_self(&param_add_node);
+
+        let mut net = Net::new(10, 4);
+        net.mutate_self(&param_toggle_enabled);
+
+        let mut net = Net::new(10, 4);
+        net.mutate_self(&param_mutate_weight);
+
+        let mut net = Net::new(10, 4);
+        net.mutate_self(&param_mutate_af);
+    }
+
+    #[test]
+    fn test_multiple_mutatations() {
+        let mut net = Net::new(11, 2);
+        net.verify_invariants();
+        let params = MutationParams {
+            prob_add_connection: 0.1,
+            prob_add_node: 0.1,
+            prob_mutate_activation_function_of_node: 0.1,
+            prob_mutate_weight: 0.1,
+            max_weight_change_magnitude: 1.0,
+            prob_toggle_enabled: 0.1,
+            prob_remove_connection: 0.0,
+            prob_remove_node: 0.0,
+        };
+        for _ in 0..100 {
+            net.mutate_self(&params);
+        }
+        //println!("Mutated Net = {net:#?}");
+    }
+
+
+    #[test]
+    fn test_remove_node() {
+        for _ in 0..100 {
+            let mut net_a = Net::new(6, 6);
+            let mut net_b = Net::new(6, 6);
+            net_a.verify_invariants();
+            net_b.verify_invariants();
+            let params = MutationParams {
+                prob_add_connection: 1.0,
+                prob_add_node: 1.0,
+                prob_mutate_activation_function_of_node: 0.0,
+                prob_mutate_weight: 0.0,
+                max_weight_change_magnitude: 1.0,
+                prob_toggle_enabled: 0.0,
+                prob_remove_connection: 0.0,
+                prob_remove_node: 0.0,
+            };
+            for _ in 0..5 {
+                net_a.mutate_self(&params);
+                net_b.mutate_self(&params);
+            }
+            let params = MutationParams {
+                prob_add_connection: 0.0,
+                prob_add_node: 0.0,
+                prob_mutate_activation_function_of_node: 0.0,
+                prob_mutate_weight: 0.0,
+                max_weight_change_magnitude: 1.0,
+                prob_toggle_enabled: 0.0,
+                prob_remove_connection: 0.0,
+                prob_remove_node: 1.0,
+            };
+            let net_d = net_a.cross_into_new_net(&net_b, &params);
+            let nodes_a = net_a.nodes.len();
+            let nodes_b = net_b.nodes.len();
+            let nodes_d = net_d.nodes.len();
+            println!("Remove NODE: Child={nodes_d} nodes; Parent A={nodes_a}; Parent B={nodes_b}");
+            println!("Remove NODE: Child={} connections; Parent A={}; Parent B={}", net_d.connections.len(), net_a.connections.len(), net_b.connections.len());
+            assert!(nodes_d < nodes_a && nodes_d < nodes_b);
+        }
+    }
+
+    #[test]
+    fn test_remove_connection() {
+        for _ in 0..100 {
+            let mut net_a = Net::new(7, 7);
+            let mut net_b = Net::new(7, 7);
+            net_a.verify_invariants();
+            net_b.verify_invariants();
+            let params = MutationParams {
+                prob_add_connection: 1.0,
+                prob_add_node: 1.0,
+                prob_mutate_activation_function_of_node: 0.0,
+                prob_mutate_weight: 0.0,
+                max_weight_change_magnitude: 1.0,
+                prob_toggle_enabled: 0.0,
+                prob_remove_connection: 0.0,
+                prob_remove_node: 0.0,
+            };
+            for _ in 0..5 {
+                net_a.mutate_self(&params);
+                net_b.mutate_self(&params);
+            }
+            let params = MutationParams {
+                prob_add_connection: 0.0,
+                prob_add_node: 0.0,
+                prob_mutate_activation_function_of_node: 0.0,
+                prob_mutate_weight: 0.0,
+                max_weight_change_magnitude: 1.0,
+                prob_toggle_enabled: 0.0,
+                prob_remove_connection: 1.0,
+                prob_remove_node: 0.0,
+            };
+            let net_c = net_a.cross_into_new_net(&net_b, &params);
+            let connections_a = net_a.connections.len();
+            let connections_b = net_b.connections.len();
+            let connections_c = net_c.connections.len();
+            println!("Remove CONNECTION: Child={connections_c} connections; Parent A={connections_a}; Parent B={connections_b}");
+            assert!(connections_a == 0 || (connections_c < connections_a && connections_c < connections_b));
+        }
+    }
+
+
+    #[test]
+    fn test_unconnected_hidden_node() {
+        let mut net_a = Net::new(1, 1);
+        assert!(net_a.nodes[0].layer == Layer::Input);
+        let ni_input = NodeIndex(net_a.id, 0);
+        assert!(net_a.nodes[1].layer == Layer::Output);
+        let ni_output = NodeIndex(net_a.id, 1);
+        let ni_ha = net_a.add_node(None, ActivationFunction::LReLU, None, 0.0);
+        let ci_x = net_a.add_connection(None, 1.0, false, ni_ha, ni_output);
+        let ni_hb = net_a.add_node(None, ActivationFunction::LReLU, None, 0.0);
+        let ci_y = net_a.add_connection(None, 1.0, true, ni_ha, ni_hb);
+        net_a.verify_invariants();
+        net_a.build_evaluation_order();
+        net_a.verify_invariants();
+    }    
 }

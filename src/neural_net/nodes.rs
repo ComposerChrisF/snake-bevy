@@ -26,7 +26,7 @@ impl fmt::Debug for NodeId {
 }
 
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Node {
     pub index: NodeIndex,
     pub id: NodeId,

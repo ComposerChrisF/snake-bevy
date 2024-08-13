@@ -5,5 +5,5 @@ mod activation_functions;
 mod layers;
 mod nodes;
 mod connections;
-mod nets;
-mod populations;
+pub mod nets;
+pub mod populations;

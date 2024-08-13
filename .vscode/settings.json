@@ -1,5 +1,12 @@
 {
     // Allow `rust-analyzer` and `cargo` to run simultaneously.
     // This uses extra storage space, so consider commenting it out.
-    "rust-analyzer.cargo.targetDir": true
+    "rust-analyzer.cargo.targetDir": true,
+
+    // HACK to debug Rust std::* 
+    "lldb.executable": "rust-lldb",
+    "lldb.launch.sourceLanguages": ["rust"],
+    "lldb.launch.sourceMap": {
+      "/rustc/9fda7c2237db910e41d6a712e9a2139b352e558b/": "/Users/chris/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust"
+    },
 }

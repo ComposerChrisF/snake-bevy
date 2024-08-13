@@ -373,7 +373,7 @@ impl SnakeGame {
         let mut pt_test = pt_start.add(offset);
         while self.grid.is_in_bounds(pt_test) && target != self.grid.get_cell(pt_test).kind {
             distance += 1;
-            pt_test = pt_start.add(offset);
+            pt_test = pt_test.add(offset);
         }
         distance
     }

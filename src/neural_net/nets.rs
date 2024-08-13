@@ -70,31 +70,31 @@ impl fmt::Debug for ConnectionIndex {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MutationParams {
-    prob_mutate_activation_function_of_node: f64,
-    prob_mutate_weight: f64,
-    max_weight_change_magnitude: f32,
-    prob_toggle_enabled: f64,
-    prob_remove_connection: f64,
-    prob_add_connection: f64,
-    prob_remove_node: f64,
-    prob_add_node: f64,
+    pub prob_mutate_activation_function_of_node: f64,
+    pub prob_mutate_weight: f64,
+    pub max_weight_change_magnitude: f32,
+    pub prob_toggle_enabled: f64,
+    pub prob_remove_connection: f64,
+    pub prob_add_connection: f64,
+    pub prob_remove_node: f64,
+    pub prob_add_node: f64,
 }
 
 
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Net {
-    id: NetId,
+    pub id: NetId,
     nodes: Vec<Node>,
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
     connections: Vec<Connection>,
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
-    fitness: f32,
+    pub fitness: f32,
     input_count: usize,
     output_count: usize,
-    is_evaluation_order_up_to_date: bool,
+    pub is_evaluation_order_up_to_date: bool,
     node_order_list: Vec<NodeIndex>,
 }
 
@@ -165,6 +165,9 @@ impl Net {
             node_order_list: Vec::with_capacity(input_count * output_count),
         };
 
+        // NOTE: We add them specifically in this order, so that we can
+        // rely on 0..input_count being the inputs, and 
+        // input_count..(input_count+output_count) being the outputs!!!
         for _ in 0..input_count { 
             net.add_node(None, ActivationFunction::None, Some(Layer::Input), 0.0);
         }
@@ -205,7 +208,7 @@ impl Net {
                 Layer::Input => assert!(is_none_or(layer, |&layer| layer == 0)),
                 Layer::Output => {
                     //println!("assert: layer={layer}, conn_count={}", node.input_connections.len());
-                    assert!(is_none_or(layer, |&layer| layer > 0 || node.input_connections.len() == 0));
+                    assert!(is_none_or(layer, |&layer| layer > 0 || node.input_connections.is_empty()));
                 },
                 _ => node.layer = if let Some(&layer) = layer {
                     //assert!(layer > 0);
@@ -218,6 +221,7 @@ impl Net {
         drop(layer_list);
         drop(node_has_been_evaluated);
         self.node_order_list = node_order_list;
+        self.is_evaluation_order_up_to_date = true;
         //self.node_values = vec![0_f32; self.nodes.len()];
     }
 
@@ -427,26 +431,26 @@ impl Net {
     }
 
 
-    fn mutate_self(&mut self, mut_params: &MutationParams) {
+    pub(super) fn mutate_self(&mut self, mut_params: &MutationParams) {
         let node_index_list   = self.nodes.iter().map(|n| n.index).collect::<Vec<_>>();
-        let input_and_hidden  = self.nodes.iter().filter_map(|n| if n.layer != Layer::Output { Some(n.index) } else { None }).collect::<Vec<_>>();
-        let hidden_and_output = self.nodes.iter().filter_map(|n| if n.layer != Layer::Input  { Some(n.index) } else { None }).collect::<Vec<_>>();
+        let input_and_hidden  = self.nodes.iter().filter_map(|n| if n.layer != Layer::Output && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
+        let hidden_and_output = self.nodes.iter().filter_map(|n| if n.layer != Layer::Input  && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
 
         // Change node's activation function
-        if thread_rng().gen_bool(mut_params.prob_mutate_activation_function_of_node) && node_index_list.len() > 0 {
+        if thread_rng().gen_bool(mut_params.prob_mutate_activation_function_of_node) && !node_index_list.is_empty() {
             let node_mutate = self.get_node_mut(Self::choose_index(&node_index_list));
             if node_mutate.layer != Layer::Input { node_mutate.activation_function = ActivationFunction::choose_random(); }
         }
 
         // Change a connection's weight
         let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
-        if thread_rng().gen_bool(mut_params.prob_mutate_weight) && connection_index_list.len() > 0 {
+        if thread_rng().gen_bool(mut_params.prob_mutate_weight) && !connection_index_list.is_empty() {
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.weight += (thread_rng().gen::<f32>() * 2.0 - 1.0) * mut_params.max_weight_change_magnitude;
         }
 
         // Toggle a conneciton's is_enabled
-        if thread_rng().gen_bool(mut_params.prob_toggle_enabled) && connection_index_list.len() > 0 {
+        if thread_rng().gen_bool(mut_params.prob_toggle_enabled) && !connection_index_list.is_empty() {
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.is_enabled = !connection_mutate.is_enabled;
         }
@@ -460,15 +464,20 @@ impl Net {
             // If we chose a "from" that comes before a "to", simply swap them
             if let Layer::Hidden(l_from) = from.layer {
                 if let Layer::Hidden(l_to) = to.layer { 
-                    if to.layer.comes_before(from.layer).unwrap() { std::mem::swap(&mut index_from, &mut index_to); }
+                    if l_from > l_to { std::mem::swap(&mut index_from, &mut index_to); }
                 }
             }
+
             // Make sure either "from" comes before "to", or that they are both in the exact same
             // hidden layer.
             assert!({
                 let l_from = self.get_node(index_from).layer;
                 let l_to   = self.get_node(index_to).layer;
-                l_from.comes_before(l_to).unwrap() || (
+                let comes_before = l_from.comes_before(l_to);
+                if comes_before.is_none() {
+                    println!("l_from={l_from}, l_to={l_to}");
+                }
+                comes_before.unwrap() || (
                     match (l_from, l_to) {
                         (Layer::Hidden(i), Layer::Hidden(j)) => i == j,
                         _ => false,
@@ -493,7 +502,7 @@ impl Net {
         // made a new connection between two nodes in the same hidden layer
 
         // Add node
-        if thread_rng().gen_bool(mut_params.prob_add_node) && connection_index_list.len() > 0 {
+        if thread_rng().gen_bool(mut_params.prob_add_node) && !connection_index_list.is_empty() {
             // Choose a random Connection, and split it into two, inserting the new node inbetween 
             // and setting old.is_enabled = false
             let connection_index_old = Self::choose_index(&connection_index_list);
@@ -515,6 +524,23 @@ impl Net {
         self.build_evaluation_order();
         //println!("NET: {self:#?}");
         self.verify_invariants();
+    }
+    
+    pub(crate) fn set_inputs(&mut self, inputs: &[f32]) {
+        assert_eq!(inputs.len(), self.input_count);
+        for (i, node) in self.nodes.iter_mut().enumerate().take(self.input_count) {
+            assert_eq!(node.layer, Layer::Input);
+            node.value = inputs[i];
+        }
+    }
+    
+    pub(crate) fn get_outputs(&self) -> Vec::<f32> {
+        let mut v = Vec::<f32>::with_capacity(self.output_count);
+        for (i, node) in self.nodes.iter().enumerate().skip(self.input_count).take(self.output_count) {
+            assert_eq!(node.layer, Layer::Output);
+            v.push(node.value);
+        }
+        v
     }
 }
 

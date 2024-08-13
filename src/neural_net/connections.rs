@@ -26,7 +26,7 @@ impl fmt::Debug for ConnectionId {
 }
 
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Connection {
     pub index: ConnectionIndex,
     pub id: ConnectionId,

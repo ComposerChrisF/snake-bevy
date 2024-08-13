@@ -20,7 +20,11 @@ impl Layer {
     }
 
     pub fn comes_before(self, other: Layer) -> Option<bool> {
-        if self == Layer::Unreachable || other == Layer::Unreachable { return None; }
+        if self == Layer::Unreachable {
+            return if other == Layer::Output { Some(true) } else { None };
+        } else if other == Layer::Unreachable { 
+            return if self == Layer::Input { Some(true) } else { None }; 
+        }
         Some(self.to_number() < other.to_number())
     }
 }

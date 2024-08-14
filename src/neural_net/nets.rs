@@ -1,6 +1,7 @@
 
 use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
-use bevy::utils::hashbrown::HashMap;
+use bevy::utils::hashbrown::{HashMap, HashSet};
+use log::{debug, trace};
 use rand::{thread_rng, Rng, prelude::SliceRandom};
 
 use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}};
@@ -93,7 +94,9 @@ pub struct Net {
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
     pub fitness: f32,
     input_count: usize,
+    input_names: Option<&'static[&'static str]>,
     output_count: usize,
+    output_names: Option<&'static[&'static str]>,
     pub is_evaluation_order_up_to_date: bool,
     node_order_list: Vec<NodeIndex>,
 }
@@ -151,7 +154,8 @@ impl Net {
         index
     }
 
-    pub fn new(input_count: usize, output_count: usize) -> Self {
+    pub fn new(input_count: usize, output_count: usize) -> Self { Self::new_with_names(input_count, None, output_count, None) }
+    pub fn new_with_names(input_count: usize, input_names: Option<&'static [&'static str]>, output_count: usize, output_names: Option<&'static[&'static str]>) -> Self {
         let mut net = Self {
             id: NetId::new_unique(),
             nodes: Vec::<Node>::with_capacity(input_count * output_count),
@@ -160,7 +164,9 @@ impl Net {
             map_connection_id_to_index: HashMap::with_capacity(input_count * output_count),
             fitness: f32::MIN,
             input_count,
+            input_names,
             output_count,
+            output_names,
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::with_capacity(input_count * output_count),
         };
@@ -195,23 +201,23 @@ impl Net {
 
         // Figure out the order to compute nodes and what layer the nodes belong to.
         for node_index in self.nodes.iter().filter_map(|n| if n.layer == Layer::Output { Some(n.index) } else { None }) {
-            self.build_evaluation_order_recurse(&mut node_order_list, &mut node_has_been_evaluated, node_index);
-            self.build_layer_order_recurse(&mut layer_list, node_index);
+            self.build_evaluation_order_recurse(0, &mut node_order_list, &mut node_has_been_evaluated, node_index);
+            self.build_layer_order_recurse(0, &mut layer_list, node_index);
         }
 
         // Copy layer number to nodes.layer from layer_list[node_index], fixing the output layers,
         // which, by convention, the output layer nodes are all the highest-valued layer.
-        //println!("{layer_list:?}");
+        trace!("{layer_list:?}");
         for node in self.nodes.iter_mut() {
             let layer = layer_list.get(&node.index);
             match node.layer {
                 Layer::Input => assert!(is_none_or(layer, |&layer| layer == 0)),
                 Layer::Output => {
-                    //println!("assert: layer={layer}, conn_count={}", node.input_connections.len());
+                    debug!("assert: layer={layer:?}, conn_count={}", node.input_connections.len());
                     assert!(is_none_or(layer, |&layer| layer > 0 || node.input_connections.is_empty()));
                 },
                 _ => node.layer = if let Some(&layer) = layer {
-                    //assert!(layer > 0);
+                    //assert!(layer > 0);       // TODO: Re-enable?
                     Layer::Hidden(layer)
                 } else {
                     Layer::Unreachable
@@ -222,14 +228,19 @@ impl Net {
         drop(node_has_been_evaluated);
         self.node_order_list = node_order_list;
         self.is_evaluation_order_up_to_date = true;
-        //self.node_values = vec![0_f32; self.nodes.len()];
     }
 
     // We figure out the order to compute all output nodes by recursively seeking the values 
     // of all required inputs for each output node.  Note that the last output_count nodes 
     // are the output nodes, so we only have to evalute them.  Thus, we might skip computation
     // of nodes that don't (eventually) connect to any output.
-    fn build_evaluation_order_recurse(&self, node_order_list: &mut Vec<NodeIndex>, node_has_been_evaluated: &mut [bool], node_index: NodeIndex) {
+    fn build_evaluation_order_recurse(&self, recursion: usize, node_order_list: &mut Vec<NodeIndex>, node_has_been_evaluated: &mut [bool], node_index: NodeIndex) {
+        if recursion > 2 * node_has_been_evaluated.len() {
+            debug!("build_evaluation_order_recurse({recursion}, {node_order_list:?}, {node_has_been_evaluated:?}, {node_index}) for");
+            debug!("{self:#?}");
+            self.print_net_structure();
+            panic!()
+        }
         assert_eq!(self.id, node_index.0);
         if node_has_been_evaluated[node_index.1] { return; /* No work to do! Already evaluated! */ }
         for &connection_index in self.get_node(node_index).input_connections.iter() {
@@ -237,20 +248,27 @@ impl Net {
             assert_eq!(node_index, connection.output_node);
             if !connection.is_enabled { continue; }     // Treat disabled connections as not being connected (i.e. do this check here rather than in evaluate()!)
             if !node_has_been_evaluated[connection.input_node.1] {
-                self.build_evaluation_order_recurse(node_order_list, node_has_been_evaluated, connection.input_node);
+                self.build_evaluation_order_recurse(recursion + 1, node_order_list, node_has_been_evaluated, connection.input_node);
             }
         }
         node_order_list.push(node_index);
         node_has_been_evaluated[node_index.1] = true;
     }
 
-    fn build_layer_order_recurse(&self, layer_list: &mut HashMap<NodeIndex, u16>, node_index: NodeIndex) -> u16 {
+    fn build_layer_order_recurse(&self, recursion: usize, layer_list: &mut HashMap<NodeIndex, u16>, node_index: NodeIndex) -> u16 {
+        if recursion > 2 * self.nodes.len() {
+            debug!("build_layer_order_recurse({recursion}, {layer_list:?}, {node_index}) for");
+            debug!("{self:#?}");
+            self.print_net_structure();
+            panic!()
+        }
+
         if layer_list.contains_key(&node_index) { return layer_list[&node_index]; /* No work to do! Already computed! */ }
         let mut layer = 0;
         for connection_index in self.get_node(node_index).input_connections.iter() {
             let connection = &self.connections[connection_index.1];
             assert_eq!(node_index, connection.output_node);
-            layer = layer.max(1 + self.build_layer_order_recurse(layer_list, connection.input_node));
+            layer = layer.max(1 + self.build_layer_order_recurse(recursion + 1, layer_list, connection.input_node));
         }
         layer_list.insert(node_index, layer);
         layer
@@ -298,13 +316,15 @@ impl Net {
             map_connection_id_to_index: HashMap::with_capacity(max_connection_count),
             fitness: 0.0,
             input_count: winner.input_count,
+            input_names: winner.input_names,
             output_count: winner.output_count,
+            output_names: winner.output_names,
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
         };
 
 
-        // TODO: Remove a node by selecting one NOT to copy!
+        // Remove a node by selecting one NOT to copy!
         let mut node_id_dont_copy: Option<NodeId> = None;
         if thread_rng().gen_bool(mut_params.prob_remove_node) {
             let hidden = winner.nodes.iter().filter_map(|n| if let Layer::Hidden(_) = n.layer { Some(n.id) } else { None }).collect::<Vec<_>>();
@@ -313,7 +333,7 @@ impl Net {
             }
         }
 
-        // TODO: Remove a connection by selecting one NOT to copy!
+        // Remove a connection by selecting one NOT to copy!
         let mut connection_id_dont_copy: Option<ConnectionId> = None;
         if thread_rng().gen_bool(mut_params.prob_remove_connection) {
             if let Some(x) = winner.connections.choose(&mut thread_rng()) {
@@ -324,7 +344,10 @@ impl Net {
 
         // Copy the common nodes randomly from either parent.  Also, copy the disjoint nodes only from the winner.
         for node_winner in winner.nodes.iter() {
-            if node_id_dont_copy.is_some_and(|id| id == node_winner.id) { continue; }
+            if node_id_dont_copy.is_some_and(|id| id == node_winner.id) { 
+                trace!("Skipping node copy of {}", node_winner.index); 
+                continue; 
+            }
             let node_to_clone = match loser.map_node_id_to_index.get(&node_winner.id) {
                 None => node_winner,
                 Some(&node_index_loser) => if thread_rng().gen_bool(0.5) { node_winner } else { loser.get_node(node_index_loser) },
@@ -335,8 +358,15 @@ impl Net {
         // Copy the common connections randomly from either parent, BUT always set the is_enabled to the value
         // from the winner.  Also, copy the disjoint connections only from the winner.
         for connection_winner in winner.connections.iter() {
-            if connection_id_dont_copy.is_some_and(|id| id == connection_winner.id) { continue; }
-            if node_id_dont_copy.is_some_and(|id| id == winner.get_node(connection_winner.input_node).id || id == winner.get_node(connection_winner.output_node).id) { continue; }
+            if connection_id_dont_copy.is_some_and(|id| id == connection_winner.id) {
+                trace!("Skipping connection copy of {connection_winner:#?}"); 
+                continue; 
+            }
+            if node_id_dont_copy.is_some_and(|id| id == winner.get_node(connection_winner. input_node).id 
+                                               || id == winner.get_node(connection_winner.output_node).id) { 
+                trace!("Skipping copy of connection due to skipping node; connection = {connection_winner:#?}"); 
+                continue; 
+            }
             let (net_of_clone, connection_to_clone) = match loser.map_connection_id_to_index.get(&connection_winner.id) {
                 None => (winner, connection_winner),
                 Some(connection_index_loser) => if thread_rng().gen_bool(0.5) { 
@@ -356,16 +386,20 @@ impl Net {
             );
         }
 
-        // Let's verify we got everything correct
-        self.verify_invariants();
+        // Our unique cross of connections might cause Node layer values to change
+        net_child.build_evaluation_order();
 
-        //println!("NET: {net_child:#?}");
+        // Let's verify we got everything correct
+        net_child.verify_invariants();
+
+        trace!("NET: {net_child:#?}");
         net_child.mutate_self(mut_params);
         net_child
     }
 
-    fn verify_invariants(&self) {
-        //println!("NET: {:?}", self); 
+    fn verify_invariants(&self) { 
+        trace!("NET: {:#?}", self);
+        //self.print_net_structure();
 
         let       node_count = self.nodes      .len();
         let connection_count = self.connections.len();
@@ -391,18 +425,23 @@ impl Net {
         // 3b. And all Node::input_connections refer to ConnectionIds from the same Net
         assert!(self.nodes.iter().all(|n| 
             n.input_connections.iter().all(|index| index.0 == self.id && index.1 < self.connections.len())));
+        // 3c. All Node::input_connections are unique (no duplicates).  We do this by collecting
+        // a HashSet of ConnectionIndexes and if the len() matches the original, there were no duplicates.
+        assert!(self.nodes.iter().all(|n| {
+            n.input_connections.iter().copied().collect::<HashSet<ConnectionIndex>>().len() == n.input_connections.len()
+        }));
 
         // 4. Nodes are in proper layers
         assert!(!self.is_evaluation_order_up_to_date || self.nodes.iter().all(|n| 
             n.input_connections.iter().all(|&c_index| {
                 let connection = self.get_connection(c_index);
                 let input_node = self.get_node(connection.input_node);
+                // `input_node` should come before `n`, unless one (or both) are
+                // `Unreachable` (because we haven't properly ordered those, so we can't check them).
                 let come_before_option = input_node.layer.comes_before(n.layer);
-                // input_node should come before n, unless one (or both) are
-                // Unreachable.
-                let should_be_true = come_before_option.unwrap_or(true);
-                if !should_be_true { println!("n={}, c_index={c_index}, input_node={}, input_node.layer={}, n.layer={}", n.index, connection.input_node, input_node.layer, n.layer)}
-                should_be_true
+                let come_before_or_is_unreachable = come_before_option.unwrap_or(true);
+                if !come_before_or_is_unreachable { trace!("n={}, c_index={c_index}, input_node={}, input_node.layer={}, n.layer={}", n.index, connection.input_node, input_node.layer, n.layer)}
+                come_before_or_is_unreachable
             })
         ));
 
@@ -411,9 +450,12 @@ impl Net {
             let input_node  = self.get_node(c. input_node);
             let output_node = self.get_node(c.output_node);
             // input_node must come before output_node, unless one of
-            // them is Unreachable, in which case None was returned.
+            // them is Unreachable, in which case None was returned, and we can't really check them out.
             input_node.layer.comes_before(output_node.layer).unwrap_or(true)
         }));
+
+        // 6. Check for cycles
+        // TODO: Not sure of an easy way to do this!
     }
 
     fn choose_index<T:Copy>(id_list: &[T]) -> T {
@@ -438,6 +480,7 @@ impl Net {
 
         // Change node's activation function
         if thread_rng().gen_bool(mut_params.prob_mutate_activation_function_of_node) && !node_index_list.is_empty() {
+            trace!("Mutating node activation function");
             let node_mutate = self.get_node_mut(Self::choose_index(&node_index_list));
             if node_mutate.layer != Layer::Input { node_mutate.activation_function = ActivationFunction::choose_random(); }
         }
@@ -445,12 +488,14 @@ impl Net {
         // Change a connection's weight
         let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
         if thread_rng().gen_bool(mut_params.prob_mutate_weight) && !connection_index_list.is_empty() {
+            trace!("Mutating connection weight");
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.weight += (thread_rng().gen::<f32>() * 2.0 - 1.0) * mut_params.max_weight_change_magnitude;
         }
 
         // Toggle a conneciton's is_enabled
         if thread_rng().gen_bool(mut_params.prob_toggle_enabled) && !connection_index_list.is_empty() {
+            trace!("Mutating connection is_enabled");
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.is_enabled = !connection_mutate.is_enabled;
         }
@@ -475,7 +520,7 @@ impl Net {
                 let l_to   = self.get_node(index_to).layer;
                 let comes_before = l_from.comes_before(l_to);
                 if comes_before.is_none() {
-                    println!("l_from={l_from}, l_to={l_to}");
+                    trace!("l_from={l_from}, l_to={l_to}");
                 }
                 comes_before.unwrap() || (
                     match (l_from, l_to) {
@@ -492,11 +537,8 @@ impl Net {
                 index_to
             );
             let connnection_new = self.get_connection(connection_index_new);
+            trace!("Mutating by adding connection {connection_index_new} from={index_from} on layer {}, to={index_to} on layer {}", self.get_node(index_from).layer, self.get_node(index_to).layer);
             assert!(connection_index_new == connnection_new.index);
-            // Since we added a new connection, we must also add this connection to the 
-            // output node's input collection.
-            let to = self.get_node_mut(index_to);
-            to.input_connections.push(connection_index_new);
         }
         // NOTE!!! From this point on, layer numbers might not be accurate... we might have
         // made a new connection between two nodes in the same hidden layer
@@ -517,12 +559,13 @@ impl Net {
             let node_index_new = self.add_node(None, activation_function, None, 0.0);
             let connection_index_new_a = self.add_connection(None, weight_connection_new_a, true, /*from*/ node_index_input, /*to*/ node_index_new);
             let connection_index_new_b = self.add_connection(None, activation_function.get_neutral_value(), true, /*from*/ node_index_new, /*to*/ node_index_output);
+            trace!("Mutating by adding node {} and connections {} and {}", node_index_new, connection_index_new_a, connection_index_new_b);
         }
 
         self.is_evaluation_order_up_to_date = false;
-        //println!("NET: {self:#?}");
+        trace!(target: "net_EXTREME", "NET: {self:#?}");
         self.build_evaluation_order();
-        //println!("NET: {self:#?}");
+        trace!(target: "net_EXTREME", "NET: {self:#?}");
         self.verify_invariants();
     }
     
@@ -542,6 +585,37 @@ impl Net {
         }
         v
     }
+
+    pub fn print_net_structure(&self) { // FUTURE: rewrite for being logging compatible
+        let mut prev = Layer::Input;
+        for n in self.nodes.iter() {
+            let index = n.index.1;
+            let kind = match n.layer {
+                Layer::Input => "I".to_string(),
+                Layer::Output => "O".to_string(),
+                Layer::Unreachable => "U".to_string(),
+                Layer::Hidden(h) => format!("H{h}"),
+            };
+            print!("N{index}/{kind} : ");
+            match n.layer {
+                Layer::Input  => if let Some(x) = self. input_names { print!("{} : ", x[index]); },
+                Layer::Output => if let Some(x) = self.output_names { print!("{} : ", x[index - self.input_count]); },
+                _ => {},
+            }
+            for (i, c) in n.input_connections.iter().map(|&i| self.get_connection(i)).enumerate() {
+                let comma = if i == 0 { "" } else { ", " };
+                let index = c.index.1;
+                let tf = if c.is_enabled { "t" } else { "FALSE" };
+                let from = c.input_node.1;
+                let to = c.output_node.1;
+                print!("{comma}C{index}({tf}:N{from}->N{to})");
+            }
+            println!();
+            if prev == Layer::Input  && n.layer != Layer::Input  { println!(); }
+            if prev == Layer::Output && n.layer != Layer::Output { println!(); }
+            prev = n.layer;
+        }
+    }
 }
 
 
@@ -549,6 +623,8 @@ impl Net {
 
 #[cfg(test)]
 mod tests {
+    use log::info;
+
     use super::*;
 
     #[test]
@@ -610,7 +686,7 @@ mod tests {
         for _ in 0..100 {
             net.mutate_self(&params);
         }
-        //println!("Mutated Net = {net:#?}");
+        info!("Mutated Net = {net:#?}");
     }
 
 
@@ -649,8 +725,8 @@ mod tests {
             let nodes_a = net_a.nodes.len();
             let nodes_b = net_b.nodes.len();
             let nodes_d = net_d.nodes.len();
-            println!("Remove NODE: Child={nodes_d} nodes; Parent A={nodes_a}; Parent B={nodes_b}");
-            println!("Remove NODE: Child={} connections; Parent A={}; Parent B={}", net_d.connections.len(), net_a.connections.len(), net_b.connections.len());
+            debug!("Remove NODE: Child={nodes_d} nodes; Parent A={nodes_a}; Parent B={nodes_b}");
+            debug!("Remove NODE: Child={} connections; Parent A={}; Parent B={}", net_d.connections.len(), net_a.connections.len(), net_b.connections.len());
             assert!(nodes_d < nodes_a && nodes_d < nodes_b);
         }
     }
@@ -690,7 +766,7 @@ mod tests {
             let connections_a = net_a.connections.len();
             let connections_b = net_b.connections.len();
             let connections_c = net_c.connections.len();
-            println!("Remove CONNECTION: Child={connections_c} connections; Parent A={connections_a}; Parent B={connections_b}");
+            debug!("Remove CONNECTION: Child={connections_c} connections; Parent A={connections_a}; Parent B={connections_b}");
             assert!(connections_a == 0 || (connections_c < connections_a && connections_c < connections_b));
         }
     }

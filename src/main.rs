@@ -8,7 +8,7 @@ use snake_bevy::nn_plays_snake::NnPlaysSnake;
 
 fn main() -> AppExit {
     let mut nn_player = NnPlaysSnake::new();
-    nn_player.run_x_generations(1_000_000);
+    nn_player.run_x_generations(100_000, 10);
     AppExit::Success
     //App::new().add_plugins(AppPlugin).run()
 }

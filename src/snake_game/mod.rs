@@ -16,6 +16,7 @@ impl Grid {
     pub const HEIGHT: i16 = 30;
     pub const _MAX_WIDTH_HEIGHT: i16 = 25; // Maximum of width & height, i.e. WIDTH.max(HEIGHT)
 
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Grid {
         let mut new_grid = Grid { 
             width: Self::WIDTH, 
@@ -249,6 +250,8 @@ pub struct SnakeGame {
     pub apples_eaten: usize,
     pub state: GameState,
     pub playback_events: Vec<PlaybackEvents>,
+    pub visited_vector: Vec<bool>,
+    pub points_visited: usize,
 }
 
 impl SnakeGame {
@@ -272,6 +275,8 @@ impl SnakeGame {
             apples_eaten: 0,
             state: GameState::Running,
             playback_events: Vec::with_capacity(256),
+            visited_vector: vec![false; Grid::WIDTH as usize * Grid::HEIGHT as usize],
+            points_visited: 0,
         };
         new_grid.playback_events.clear();
         new_grid.playback_events.push(PlaybackEvents::NewGame);
@@ -291,6 +296,12 @@ impl SnakeGame {
         self.playback_events.clear();
         self.playback_events.push(PlaybackEvents::NewGame);
         self.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
+        self.clear_visited();
+        self.points_visited = 0;
+    }
+
+    pub fn clear_visited(&mut self) {
+        self.visited_vector.fill(false);
     }
 
     /// Move the snake, typically from user input.  For playback, `new_apple_location` allows
@@ -352,6 +363,11 @@ impl SnakeGame {
         // Push on new Head
         self.snake.locations.push_front(new_location);
         self.snake.head_location = new_location;
+
+        // Update visited info
+        let i = new_location.y as usize * Grid::WIDTH as usize + new_location.x as usize;
+        if !self.visited_vector[i] { self.points_visited += 1; }
+        self.visited_vector[i] = true;
     }
 
 

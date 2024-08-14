@@ -9,17 +9,21 @@ use super::nets::{MutationParams, Net};
 pub struct Population {
     pub nets: Vec<Net>,
     input_count: usize,
+    input_names: Option<&'static[&'static str]>,
     output_count: usize,
+    output_names: Option<&'static[&'static str]>,
     population_size: usize,
     mutation_params: MutationParams,
 }
 
 impl Population {
-    pub fn new(input_count: usize, output_count: usize, population_size: usize, mutation_params: MutationParams) -> Self {
+    pub fn new(input_count: usize, input_names: Option<&'static [&'static str]>, output_count: usize, output_names: Option<&'static [&'static str]>, population_size: usize, mutation_params: MutationParams) -> Self {
         Self {
             nets: Vec::<Net>::new(),
             input_count,
+            input_names,
             output_count,
+            output_names,
             population_size,
             mutation_params,
         }
@@ -29,11 +33,12 @@ impl Population {
         self.create_initial_population();
         self.evaluate_population(f);
         self.create_next_generation();
+
     }
 
     pub fn create_initial_population(&mut self) {
         while self.nets.len() < self.population_size {
-            let mut net = Net::new(self.input_count, self.output_count);
+            let mut net = Net::new_with_names(self.input_count, self.input_names, self.output_count, self.output_names);
             net.mutate_self(&self.mutation_params);
             assert!(net.is_evaluation_order_up_to_date);
             self.nets.push(net);

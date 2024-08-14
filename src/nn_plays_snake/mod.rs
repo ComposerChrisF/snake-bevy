@@ -8,26 +8,24 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 // - Support load/save of game playback
 // - Create separate Playback viewer
 // - Combine net viewer with playback viewer (animate net during playback!)
-// x Track unique cells visited, reset each apple eaten, adds to score in minor way
-//      New Max: NetId(196774): fitness=2431, moves=1418, apples=0, visited=1013
-//      New Max: NetId(273216): fitness=2471, moves=1486, apples=0, visited=985
-//      New Max: NetId(309134): fitness=2545, moves=1523, apples=0, visited=1022
-//      New Max: NetId(94449): fitness=1980, moves=990, apples=0, visited=990
-//      Best for gen 104: NetId(94449): fitness=1750.75
 // - Prune Layer::Unreachable nodes!
 // - Mark nodes not (eventually) reaching back to Inputs as Layer::Unreachable
 // - OR: Figure out how to correctly assign Hidden(#) to current Unreachables!
 // - Write out Nets (and Playback) when "New Max" above 550 encountered (pass in command line?)
-// - Add multi-threading for running generations
-// x !!! Instead of running a single game per Net, run X games per Net and take a weighted average (75% * top  + 25% * average)
 // - Refactor NeuralNet and SnakeGame into crates separate from snake_bevy
-// - !!! Write custom Net formatter (to do like my own manual deciphering of network)--make printing nicer!
-// + !!! Fix the stack-overflow.  Must be one of the two recursive functions--debug by counting recursions and print net when too deep!
-//      - Two bugs: 
-//          x C18 repeated twice on N21 (so assert connections not in node.input_nodes more than once!)
-//          - Loop was created: C17(T:N21->N20) and C18(T:N20->N21), both N20 and N21 started as H4
 // - Add originating NetId into ConnectionId (and NodeId)?  So we can trace geneology?
 // - Mark Nets with a GUID for easy long-term identification
+// - When population stagnates (e.g. 100 generations without new highest fitness):
+//      - Always stash newest best fitness when above, say, 100 generations
+//      - Increase mutations
+//      - If population has already been rebooted x times, then seed next generation from the 
+//          stash instead of usual best from prev generation; reset reboot counter
+//      - Stash top 5% or so, and reboot population
+//      - CONSIDER: Using NEAT approach to retaining genetically distinct Nets in population?
+//      - CONSIDER: Using different fitness functions to create diversity
+//      - Refactor MetaParameters into separate struct for ease of use
+// - Add multi-threading for running generations
+// x Why no apples eaten?!?
 
 
 struct MaxInfo {
@@ -84,7 +82,7 @@ impl NnPlaysSnake {
     pub fn new() -> Self {
         let input_count = NUM_INPUTS;
         let output_count = NUM_OUTPUTS; // Move N, S, E, or W
-        let population_size = 1000;
+        let population_size = 1_000;
         let mutation_params = MutationParams {
             prob_add_connection: 0.05,
             prob_add_node: 0.05,
@@ -97,7 +95,11 @@ impl NnPlaysSnake {
         };
         Self {
             game: SnakeGame::new(None),
-            population: Population::new(input_count, Some(&INPUT_NAMES), output_count, Some(&OUTPUT_NAMES), population_size, mutation_params),
+            population: Population::new(
+                input_count,  Some(&INPUT_NAMES), 
+                output_count, Some(&OUTPUT_NAMES),
+                population_size, mutation_params
+            ),
             max_info: MaxInfo::default(),
         }
     }

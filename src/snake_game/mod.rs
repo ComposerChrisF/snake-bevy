@@ -291,6 +291,8 @@ impl SnakeGame {
             None => self.grid.new_viable_apple_location(),
             Some(pt) => pt,
         };
+        let apple_cell = self.grid.get_cell_mut(self.apple.location);
+        apple_cell.kind = CellKind::Apple;
         self.apples_eaten = 0;
         self.state = GameState::Running;
         self.playback_events.clear();

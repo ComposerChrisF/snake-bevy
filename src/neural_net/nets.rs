@@ -71,6 +71,28 @@ impl fmt::Debug for ConnectionIndex {
 }
 
 
+
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NetParams {
+    pub input_count: usize,
+    pub input_names: Option<&'static[&'static str]>,
+    pub output_count: usize,
+    pub output_names: Option<&'static[&'static str]>,
+}
+
+impl NetParams {
+    fn from_size(input_count: usize, output_count: usize) -> Self {
+        NetParams {
+            input_count,
+            input_names: None,
+            output_count,
+            output_names: None,
+        }
+    }
+}
+
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MutationParams {
     pub prob_mutate_activation_function_of_node: f64,
@@ -88,15 +110,12 @@ pub struct MutationParams {
 #[derive(Clone, Debug)]
 pub struct Net {
     pub id: NetId,
+    pub net_params: NetParams,
     nodes: Vec<Node>,
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
     connections: Vec<Connection>,
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
     pub fitness: f32,
-    input_count: usize,
-    input_names: Option<&'static[&'static str]>,
-    output_count: usize,
-    output_names: Option<&'static[&'static str]>,
     pub is_evaluation_order_up_to_date: bool,
     node_order_list: Vec<NodeIndex>,
 }
@@ -154,30 +173,27 @@ impl Net {
         index
     }
 
-    pub fn new(input_count: usize, output_count: usize) -> Self { Self::new_with_names(input_count, None, output_count, None) }
-    pub fn new_with_names(input_count: usize, input_names: Option<&'static [&'static str]>, output_count: usize, output_names: Option<&'static[&'static str]>) -> Self {
+    pub fn new(net_params: NetParams) -> Self {
+        let capacity = net_params.input_count + net_params.output_count;
         let mut net = Self {
             id: NetId::new_unique(),
-            nodes: Vec::<Node>::with_capacity(input_count * output_count),
-            map_node_id_to_index: HashMap::<NodeId, NodeIndex>::with_capacity(input_count + output_count),
-            connections: Vec::with_capacity(input_count * output_count),
-            map_connection_id_to_index: HashMap::with_capacity(input_count * output_count),
+            net_params,
+            nodes: Vec::<Node>::with_capacity(capacity),
+            map_node_id_to_index: HashMap::<NodeId, NodeIndex>::with_capacity(capacity),
+            connections: Vec::with_capacity(capacity),
+            map_connection_id_to_index: HashMap::with_capacity(capacity),
             fitness: f32::MIN,
-            input_count,
-            input_names,
-            output_count,
-            output_names,
             is_evaluation_order_up_to_date: false,
-            node_order_list: Vec::with_capacity(input_count * output_count),
+            node_order_list: Vec::with_capacity(capacity),
         };
 
         // NOTE: We add them specifically in this order, so that we can
         // rely on 0..input_count being the inputs, and 
         // input_count..(input_count+output_count) being the outputs!!!
-        for _ in 0..input_count { 
+        for _ in 0..net.net_params.input_count { 
             net.add_node(None, ActivationFunction::None, Some(Layer::Input), 0.0);
         }
-        for _ in 0..output_count {
+        for _ in 0..net.net_params.output_count {
             net.add_node(None, ActivationFunction::Sigmoid, Some(Layer::Output), 0.0);
         }
         net
@@ -310,15 +326,12 @@ impl Net {
         let max_connection_count = self.connections.len().max(other.connections.len());
         let mut net_child = Self {
             id: NetId::new_unique(),
+            net_params: winner.net_params.clone(),
             nodes: Vec::with_capacity(max_node_count),
             map_node_id_to_index: HashMap::with_capacity(max_node_count),
             connections: Vec::with_capacity(max_connection_count),
             map_connection_id_to_index: HashMap::with_capacity(max_connection_count),
             fitness: 0.0,
-            input_count: winner.input_count,
-            input_names: winner.input_names,
-            output_count: winner.output_count,
-            output_names: winner.output_names,
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
         };
@@ -570,16 +583,16 @@ impl Net {
     }
     
     pub(crate) fn set_inputs(&mut self, inputs: &[f32]) {
-        assert_eq!(inputs.len(), self.input_count);
-        for (i, node) in self.nodes.iter_mut().enumerate().take(self.input_count) {
+        assert_eq!(inputs.len(), self.net_params.input_count);
+        for (i, node) in self.nodes.iter_mut().enumerate().take(self.net_params.input_count) {
             assert_eq!(node.layer, Layer::Input);
             node.value = inputs[i];
         }
     }
     
     pub(crate) fn get_outputs(&self) -> Vec::<f32> {
-        let mut v = Vec::<f32>::with_capacity(self.output_count);
-        for (i, node) in self.nodes.iter().enumerate().skip(self.input_count).take(self.output_count) {
+        let mut v = Vec::<f32>::with_capacity(self.net_params.output_count);
+        for (i, node) in self.nodes.iter().enumerate().skip(self.net_params.input_count).take(self.net_params.output_count) {
             assert_eq!(node.layer, Layer::Output);
             v.push(node.value);
         }
@@ -598,8 +611,8 @@ impl Net {
             };
             print!("N{index}/{kind} : ");
             match n.layer {
-                Layer::Input  => if let Some(x) = self. input_names { print!("{} : ", x[index]); },
-                Layer::Output => if let Some(x) = self.output_names { print!("{} : ", x[index - self.input_count]); },
+                Layer::Input  => if let Some(x) = self.net_params. input_names { print!("{} : ", x[index]); },
+                Layer::Output => if let Some(x) = self.net_params.output_names { print!("{} : ", x[index - self.net_params.input_count]); },
                 _ => {},
             }
             for (i, c) in n.input_connections.iter().map(|&i| self.get_connection(i)).enumerate() {
@@ -629,13 +642,13 @@ mod tests {
 
     #[test]
     fn verify_invariants_on_empty() {
-        let net = Net::new(7, 5);
+        let net = Net::new(NetParams::from_size(7, 5));
         net.verify_invariants();
     }
 
     #[test]
     fn test_mutations_separately() {
-        let net = Net::new(10, 4);
+        let net = Net::new(NetParams::from_size(10, 4));
         net.verify_invariants();
         let params = MutationParams {
             prob_add_connection: 0.0,
@@ -653,25 +666,25 @@ mod tests {
         let mut param_mutate_weight  = params.clone();  param_mutate_weight .prob_mutate_weight  = 1.0;   param_mutate_weight.max_weight_change_magnitude = 5.0;
         let mut param_mutate_af      = params.clone();  param_mutate_af     .prob_mutate_activation_function_of_node = 1.0;
 
-        let mut net = Net::new(10, 4);
+        let mut net = Net::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_add_connection);
 
-        let mut net = Net::new(10, 4);
+        let mut net = Net::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_add_node);
 
-        let mut net = Net::new(10, 4);
+        let mut net = Net::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_toggle_enabled);
 
-        let mut net = Net::new(10, 4);
+        let mut net = Net::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_mutate_weight);
 
-        let mut net = Net::new(10, 4);
+        let mut net = Net::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_mutate_af);
     }
 
     #[test]
     fn test_multiple_mutatations() {
-        let mut net = Net::new(11, 2);
+        let mut net = Net::new(NetParams::from_size(11, 2));
         net.verify_invariants();
         let params = MutationParams {
             prob_add_connection: 0.1,
@@ -693,8 +706,8 @@ mod tests {
     #[test]
     fn test_remove_node() {
         for _ in 0..100 {
-            let mut net_a = Net::new(6, 6);
-            let mut net_b = Net::new(6, 6);
+            let mut net_a = Net::new(NetParams::from_size(6, 6));
+            let mut net_b = Net::new(NetParams::from_size(6, 6));
             net_a.verify_invariants();
             net_b.verify_invariants();
             let params = MutationParams {
@@ -734,8 +747,8 @@ mod tests {
     #[test]
     fn test_remove_connection() {
         for _ in 0..100 {
-            let mut net_a = Net::new(7, 7);
-            let mut net_b = Net::new(7, 7);
+            let mut net_a = Net::new(NetParams::from_size(7, 7));
+            let mut net_b = Net::new(NetParams::from_size(7, 7));
             net_a.verify_invariants();
             net_b.verify_invariants();
             let params = MutationParams {
@@ -774,7 +787,7 @@ mod tests {
 
     #[test]
     fn test_unconnected_hidden_node() {
-        let mut net_a = Net::new(1, 1);
+        let mut net_a = Net::new(NetParams::from_size(1, 1));
         assert!(net_a.nodes[0].layer == Layer::Input);
         let ni_input = NodeIndex(net_a.id, 0);
         assert!(net_a.nodes[1].layer == Layer::Output);

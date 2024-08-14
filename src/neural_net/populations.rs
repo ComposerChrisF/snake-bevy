@@ -2,30 +2,27 @@ use std::cmp::Ordering;
 
 use rand::{thread_rng, Rng};
 
-use super::nets::{MutationParams, Net};
+use super::nets::{MutationParams, Net, NetParams};
 
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopulationParams {
+    pub population_size: usize,
+    pub mutation_params: MutationParams,
+    pub net_params: NetParams,
+}
 
 
 pub struct Population {
     pub nets: Vec<Net>,
-    input_count: usize,
-    input_names: Option<&'static[&'static str]>,
-    output_count: usize,
-    output_names: Option<&'static[&'static str]>,
-    population_size: usize,
-    mutation_params: MutationParams,
+    pub population_params: PopulationParams,
 }
 
 impl Population {
-    pub fn new(input_count: usize, input_names: Option<&'static [&'static str]>, output_count: usize, output_names: Option<&'static [&'static str]>, population_size: usize, mutation_params: MutationParams) -> Self {
+    pub fn new(meta: PopulationParams) -> Self {
         Self {
             nets: Vec::<Net>::new(),
-            input_count,
-            input_names,
-            output_count,
-            output_names,
-            population_size,
-            mutation_params,
+            population_params: meta,
         }
     }
 
@@ -37,9 +34,9 @@ impl Population {
     }
 
     pub fn create_initial_population(&mut self) {
-        while self.nets.len() < self.population_size {
-            let mut net = Net::new_with_names(self.input_count, self.input_names, self.output_count, self.output_names);
-            net.mutate_self(&self.mutation_params);
+        while self.nets.len() < self.population_params.population_size {
+            let mut net = Net::new(self.population_params.net_params.clone());
+            net.mutate_self(&self.population_params.mutation_params);
             assert!(net.is_evaluation_order_up_to_date);
             self.nets.push(net);
         }
@@ -79,17 +76,17 @@ impl Population {
 
         // Fill out 10% of population by randomly choosing from current population, in proportion
         // to their fitness.
-        let ten_percent = (self.population_size as f32 * 0.1).round() as usize - 1;
+        let ten_percent = (self.population_params.population_size as f32 * 0.1).round() as usize - 1;
         for _ in 0..ten_percent {
             let net_chosen = &self.nets[self.choose(points_sum, &net_points)];
             nets_new.push(net_chosen.clone());
         }
 
         // Randomly choose nets to cross proportionally by fitness
-        while nets_new.len() < self.population_size {
+        while nets_new.len() < self.population_params.population_size {
             let net_chosen_a = &self.nets[self.choose(points_sum, &net_points)];
             let net_chosen_b = &self.nets[self.choose(points_sum, &net_points)];
-            let net_new = net_chosen_a.cross_into_new_net(net_chosen_b, &self.mutation_params);
+            let net_new = net_chosen_a.cross_into_new_net(net_chosen_b, &self.population_params.mutation_params);
             nets_new.push(net_new);
         }
         self.nets = nets_new;

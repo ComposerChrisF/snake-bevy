@@ -1,4 +1,5 @@
-use crate::neural_net::nets::Net;
+use crate::neural_net::nets::{Net, NetParams};
+use crate::neural_net::populations::PopulationParams;
 use crate::snake_game::{Direction, GameState, SnakeGame};
 use crate::neural_net::{populations::Population, nets::MutationParams};
 
@@ -23,15 +24,13 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //      - Stash top 5% or so, and reboot population
 //      - CONSIDER: Using NEAT approach to retaining genetically distinct Nets in population?
 //      - CONSIDER: Using different fitness functions to create diversity
-//      - Refactor MetaParameters into separate struct for ease of use
+//      x Refactor MetaParameters into separate struct for ease of use
 // - Add multi-threading for running generations
 // x Why no apples eaten?!?
 
 
 struct MaxInfo {
     fitness: f32,
-    //moves: usize,
-    //apples: usize,
     //net_id: Option<NetId>,
 }
 
@@ -39,12 +38,11 @@ impl Default for MaxInfo {
     fn default() -> Self {
         MaxInfo {
             fitness: f32::MIN,
-            //moves: 0,
-            //apples: 0,
             //net_id: None,
         }
     }
 }
+
 
 
 #[allow(clippy::identity_op)]
@@ -67,10 +65,22 @@ pub const OUTPUT_NAMES: [&str; NUM_OUTPUTS] = [
     "MoveN", "MoveE", "MoveS", "MoveW",
 ];
 
+
+#[derive(Clone,Debug)]
+pub struct MyMetaParams {
+    pub max_generations: usize, // 100_000
+    pub games_per_net: usize, // 10
+    pub meta: PopulationParams,
+}
+
+
+
 pub struct NnPlaysSnake {
     game: SnakeGame,
+    my_meta: MyMetaParams,
     population: Population,
     max_info: MaxInfo,
+    stashed_nets: Vec<Net>,
 }
 
 
@@ -80,33 +90,41 @@ impl Default for NnPlaysSnake {
 
 impl NnPlaysSnake {
     pub fn new() -> Self {
-        let input_count = NUM_INPUTS;
-        let output_count = NUM_OUTPUTS; // Move N, S, E, or W
-        let population_size = 1_000;
-        let mutation_params = MutationParams {
-            prob_add_connection: 0.05,
-            prob_add_node: 0.05,
-            prob_mutate_activation_function_of_node: 0.05,
-            prob_mutate_weight: 0.10,
-            max_weight_change_magnitude: 1.0,
-            prob_toggle_enabled: 0.025,
-            prob_remove_connection: 0.01,
-            prob_remove_node: 0.025,
+        let my_meta = MyMetaParams {
+            max_generations: 100_000,
+            games_per_net: 10,
+            meta: PopulationParams {
+                population_size: 1_000,
+                net_params: NetParams {
+                    input_count: NUM_INPUTS,
+                    input_names: Some(&INPUT_NAMES),
+                    output_count: NUM_OUTPUTS,
+                    output_names: Some(&OUTPUT_NAMES),
+                },
+                mutation_params: MutationParams {
+                    prob_add_connection: 0.05,
+                    prob_add_node: 0.05,
+                    prob_mutate_activation_function_of_node: 0.05,
+                    prob_mutate_weight: 0.10,
+                    max_weight_change_magnitude: 1.0,
+                    prob_toggle_enabled: 0.025,
+                    prob_remove_connection: 0.01,
+                    prob_remove_node: 0.025,
+                },
+            },
         };
         Self {
             game: SnakeGame::new(None),
-            population: Population::new(
-                input_count,  Some(&INPUT_NAMES), 
-                output_count, Some(&OUTPUT_NAMES),
-                population_size, mutation_params
-            ),
+            my_meta: my_meta.clone(),
+            population: Population::new(my_meta.meta),
             max_info: MaxInfo::default(),
+            stashed_nets: Vec::new(),
         }
     }
 
-    pub fn run_x_generations(&mut self, x: usize, games_per_net: usize) {
-        for generation in 0..x {
-            self.run_one_generation(games_per_net);
+    pub fn run_x_generations(&mut self) {
+        for generation in 0..self.my_meta.max_generations {
+            self.run_one_generation(self.my_meta.games_per_net);
             if (generation % 2) == 0 {
                 let n = &self.population.nets[0];
                 println!("Best for gen {generation}: {}: fitness={}", n.id, n.fitness);
@@ -127,6 +145,7 @@ impl NnPlaysSnake {
                     let apples = game.apples_eaten;
                     println!("New Max: {}: fitness={fitness}, moves={moves}, apples={apples}, visited={}", net.id, game.points_visited);
                     global_max_fitness = fitness;
+                    self.stashed_nets.push(net.clone());
                 }
                 if max_for_net < fitness { max_for_net = fitness; }
                 sum += fitness;

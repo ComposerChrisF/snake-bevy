@@ -15,23 +15,23 @@ pub struct PopulationParams {
     pub net_params: NetParams,
 }
 
-pub trait HasFitness : Clone + Default + std::fmt::Debug +  {
+pub trait FitnessInfo : Clone + Default + std::fmt::Debug {
     fn get_fitness(&self) -> f32;
     fn set_fitness(&mut self, new: f32);
 }
 
-impl HasFitness for f32 {
+impl FitnessInfo for f32 {
     fn get_fitness(&self) -> f32 { *self }
     fn set_fitness(&mut self, new: f32) { *self = new; }
 }
 
 
-pub struct Population<F> where F: HasFitness {
+pub struct Population<F> where F: FitnessInfo {
     pub nets: Vec<Net<F>>,
     pub population_params: PopulationParams,
 }
 
-impl <F> Population<F> where F: HasFitness {
+impl <F> Population<F> where F: FitnessInfo {
     pub fn new(meta: PopulationParams) -> Self {
         Self {
             nets: Vec::<Net<F>>::new(),
@@ -57,15 +57,15 @@ impl <F> Population<F> where F: HasFitness {
 
     pub fn evaluate_population(&mut self, mut f: impl FnMut(&mut Net<F>) -> F) {
         for net in self.nets.iter_mut() {
-            net.fitness = f(net);
+            net.fitness_info = f(net);
         }
     }
 
     pub fn create_next_generation(&mut self, mutation_multipier: f64) {
         // Sort population by fitness
-        self.nets.sort_by(|a,b| Ordering::reverse(a.fitness.get_fitness().partial_cmp(&b.fitness.get_fitness()).unwrap()));
-        assert!(self.nets[0].fitness.get_fitness() >= self.nets[self.nets.len() - 1].fitness.get_fitness());
-        assert!(self.nets[0].fitness.get_fitness() >= self.nets[1].fitness.get_fitness());
+        self.nets.sort_by(|a,b| Ordering::reverse(a.fitness_info.get_fitness().partial_cmp(&b.fitness_info.get_fitness()).unwrap()));
+        assert!(self.nets[0].fitness_info.get_fitness() >= self.nets[self.nets.len() - 1].fitness_info.get_fitness());
+        assert!(self.nets[0].fitness_info.get_fitness() >= self.nets[1].fitness_info.get_fitness());
         let mut nets_already_chosen = HashSet::<NetId>::with_capacity(self.nets.len());
         //for i in 0..self.nets.len() {
         //    let net = &self.nets[i];
@@ -73,14 +73,14 @@ impl <F> Population<F> where F: HasFitness {
         //}
 
         // Allocate points based on fitness scores
-        let mut fitness_prev = self.nets[0].fitness.get_fitness();
+        let mut fitness_prev = self.nets[0].fitness_info.get_fitness();
         let mut points_cur = 100.0_f32;
         let mut points_sum = 0.0_f32;
         let mut net_points = vec![0.0_f32; self.nets.len()];
         for (i, net) in self.nets.iter().enumerate() {
-            points_cur *= 1.0 - ((fitness_prev.get_fitness() - net.fitness.get_fitness()) / fitness_prev);
+            points_cur *= 1.0 - ((fitness_prev.get_fitness() - net.fitness_info.get_fitness()) / fitness_prev);
             points_cur = points_cur.max(1.0);
-            fitness_prev = net.fitness.get_fitness();
+            fitness_prev = net.fitness_info.get_fitness();
             net_points[i] = points_cur;
             points_sum += points_cur;
         }

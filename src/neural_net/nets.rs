@@ -4,7 +4,7 @@ use bevy::utils::hashbrown::{HashMap, HashSet};
 use log::{debug, trace};
 use rand::{thread_rng, Rng, prelude::SliceRandom};
 
-use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::HasFitness};
+use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::FitnessInfo};
 
 fn is_none_or<T, U>(val: Option<T>, f: U) -> bool 
     where T: Sized, U: FnOnce(T) -> bool {
@@ -108,19 +108,19 @@ pub struct MutationParams {
 
 
 #[derive(Clone, Debug)]
-pub struct Net<F> where F: HasFitness {
+pub struct Net<F> where F: FitnessInfo {
     pub id: NetId,
     pub net_params: NetParams,
     nodes: Vec<Node>,
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
     connections: Vec<Connection>,
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
-    pub fitness: F,
+    pub fitness_info: F,
     pub is_evaluation_order_up_to_date: bool,
     node_order_list: Vec<NodeIndex>,
 }
 
-impl <F> Net<F> where F: HasFitness {
+impl <F> Net<F> where F: FitnessInfo {
     pub fn get_node(&self, i: NodeIndex) -> &Node {
         assert_eq!(i.0, self.id);
         &self.nodes[i.1]
@@ -182,7 +182,7 @@ impl <F> Net<F> where F: HasFitness {
             map_node_id_to_index: HashMap::<NodeId, NodeIndex>::with_capacity(capacity),
             connections: Vec::with_capacity(capacity),
             map_connection_id_to_index: HashMap::with_capacity(capacity),
-            fitness: F::default(),
+            fitness_info: F::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::with_capacity(capacity),
         };
@@ -318,7 +318,7 @@ impl <F> Net<F> where F: HasFitness {
     
     pub(super) fn cross_into_new_net(&self, other: &Self, mut_params: &MutationParams, mutation_multiplier: f64) -> Self {
         // Choose a "winning" parent, partially based on fitnesses
-        let (winner, loser) = if self.fitness.get_fitness() >= other.fitness.get_fitness() { (self, other) } else { (other, self) };
+        let (winner, loser) = if self.fitness_info.get_fitness() >= other.fitness_info.get_fitness() { (self, other) } else { (other, self) };
         // Small chance to actually choose the "loser" as the winner:
         let (winner, loser) = if thread_rng().gen_bool(0.2) { (loser, winner) } else { (winner, loser) };
 
@@ -332,7 +332,7 @@ impl <F> Net<F> where F: HasFitness {
             map_node_id_to_index: HashMap::with_capacity(max_node_count),
             connections: Vec::with_capacity(max_connection_count),
             map_connection_id_to_index: HashMap::with_capacity(max_connection_count),
-            fitness: F::default(),
+            fitness_info: F::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
         };

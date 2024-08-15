@@ -4,7 +4,7 @@ use bevy::utils::hashbrown::{HashMap, HashSet};
 use log::{debug, trace};
 use rand::{thread_rng, Rng, prelude::SliceRandom};
 
-use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}};
+use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::HasFitness};
 
 fn is_none_or<T, U>(val: Option<T>, f: U) -> bool 
     where T: Sized, U: FnOnce(T) -> bool {
@@ -108,19 +108,19 @@ pub struct MutationParams {
 
 
 #[derive(Clone, Debug)]
-pub struct Net {
+pub struct Net<F> where F: HasFitness {
     pub id: NetId,
     pub net_params: NetParams,
     nodes: Vec<Node>,
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
     connections: Vec<Connection>,
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
-    pub fitness: f32,
+    pub fitness: F,
     pub is_evaluation_order_up_to_date: bool,
     node_order_list: Vec<NodeIndex>,
 }
 
-impl Net {
+impl <F> Net<F> where F: HasFitness {
     pub fn get_node(&self, i: NodeIndex) -> &Node {
         assert_eq!(i.0, self.id);
         &self.nodes[i.1]
@@ -182,7 +182,7 @@ impl Net {
             map_node_id_to_index: HashMap::<NodeId, NodeIndex>::with_capacity(capacity),
             connections: Vec::with_capacity(capacity),
             map_connection_id_to_index: HashMap::with_capacity(capacity),
-            fitness: f32::MIN,
+            fitness: F::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::with_capacity(capacity),
         };
@@ -318,11 +318,9 @@ impl Net {
     
     pub(super) fn cross_into_new_net(&self, other: &Self, mut_params: &MutationParams, mutation_multiplier: f64) -> Self {
         // Choose a "winning" parent, partially based on fitnesses
-        let (winner, loser) = match thread_rng().gen_range(0..4) {
-            0 => if thread_rng().gen_bool(0.5)    { (self, other) } else { (other, self) }, // 25% of the time, choose randomly
-            _ => if self.fitness >= other.fitness { (self, other) } else { (other, self) }, // 75% of the time, choose highest fitness
-            // FUTURE: Choose proportionally based on relative fitnesses
-        };
+        let (winner, loser) = if self.fitness.get_fitness() >= other.fitness.get_fitness() { (self, other) } else { (other, self) };
+        // Small chance to actually choose the "loser" as the winner:
+        let (winner, loser) = if thread_rng().gen_bool(0.2) { (loser, winner) } else { (winner, loser) };
 
         // Initialize the child Net
         let max_node_count = self.nodes.len().max(other.nodes.len());
@@ -334,7 +332,7 @@ impl Net {
             map_node_id_to_index: HashMap::with_capacity(max_node_count),
             connections: Vec::with_capacity(max_connection_count),
             map_connection_id_to_index: HashMap::with_capacity(max_connection_count),
-            fitness: f32::MIN,
+            fitness: F::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
         };
@@ -645,13 +643,13 @@ mod tests {
 
     #[test]
     fn verify_invariants_on_empty() {
-        let net = Net::new(NetParams::from_size(7, 5));
+        let net = Net::<f32>::new(NetParams::from_size(7, 5));
         net.verify_invariants();
     }
 
     #[test]
     fn test_mutations_separately() {
-        let net = Net::new(NetParams::from_size(10, 4));
+        let net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.verify_invariants();
         let params = MutationParams {
             prob_add_connection: 0.0,
@@ -669,25 +667,25 @@ mod tests {
         let mut param_mutate_weight  = params.clone();  param_mutate_weight .prob_mutate_weight  = 1.0;   param_mutate_weight.max_weight_change_magnitude = 5.0;
         let mut param_mutate_af      = params.clone();  param_mutate_af     .prob_mutate_activation_function_of_node = 1.0;
 
-        let mut net = Net::new(NetParams::from_size(10, 4));
+        let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_add_connection, 1.0);
 
-        let mut net = Net::new(NetParams::from_size(10, 4));
+        let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_add_node, 1.0);
 
-        let mut net = Net::new(NetParams::from_size(10, 4));
+        let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_toggle_enabled, 1.0);
 
-        let mut net = Net::new(NetParams::from_size(10, 4));
+        let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_mutate_weight, 1.0);
 
-        let mut net = Net::new(NetParams::from_size(10, 4));
+        let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_mutate_af, 1.0);
     }
 
     #[test]
     fn test_multiple_mutatations() {
-        let mut net = Net::new(NetParams::from_size(11, 2));
+        let mut net = Net::<f32>::new(NetParams::from_size(11, 2));
         net.verify_invariants();
         let params = MutationParams {
             prob_add_connection: 0.1,
@@ -709,8 +707,8 @@ mod tests {
     #[test]
     fn test_remove_node() {
         for _ in 0..100 {
-            let mut net_a = Net::new(NetParams::from_size(6, 6));
-            let mut net_b = Net::new(NetParams::from_size(6, 6));
+            let mut net_a = Net::<f32>::new(NetParams::from_size(6, 6));
+            let mut net_b = Net::<f32>::new(NetParams::from_size(6, 6));
             net_a.verify_invariants();
             net_b.verify_invariants();
             let params = MutationParams {
@@ -750,8 +748,8 @@ mod tests {
     #[test]
     fn test_remove_connection() {
         for _ in 0..100 {
-            let mut net_a = Net::new(NetParams::from_size(7, 7));
-            let mut net_b = Net::new(NetParams::from_size(7, 7));
+            let mut net_a = Net::<f32>::new(NetParams::from_size(7, 7));
+            let mut net_b = Net::<f32>::new(NetParams::from_size(7, 7));
             net_a.verify_invariants();
             net_b.verify_invariants();
             let params = MutationParams {
@@ -790,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_unconnected_hidden_node() {
-        let mut net_a = Net::new(NetParams::from_size(1, 1));
+        let mut net_a = Net::<f32>::new(NetParams::from_size(1, 1));
         assert!(net_a.nodes[0].layer == Layer::Input);
         let ni_input = NodeIndex(net_a.id, 0);
         assert!(net_a.nodes[1].layer == Layer::Output);

@@ -1,5 +1,5 @@
 use crate::neural_net::nets::{Net, NetParams};
-use crate::neural_net::populations::PopulationParams;
+use crate::neural_net::populations::{HasFitness, PopulationParams};
 use crate::snake_game::{Direction, GameState, SnakeGame};
 use crate::neural_net::{populations::Population, nets::MutationParams};
 
@@ -46,19 +46,27 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 // - Add multi-threading for running generations
 
 
-struct MaxInfo {
+#[derive(Clone, Debug)]
+pub struct FitnessInfo {
     fitness: f32,
     //net_id: Option<NetId>,
 }
 
-impl Default for MaxInfo {
+impl Default for FitnessInfo {
     fn default() -> Self {
-        MaxInfo {
+        FitnessInfo {
             fitness: f32::MIN,
             //net_id: None,
         }
     }
 }
+
+impl HasFitness for FitnessInfo {
+    fn get_fitness(&self) -> f32 { self.fitness }
+    fn set_fitness(&mut self, new: f32) { self.fitness = new; }
+}
+
+
 
 
 
@@ -87,19 +95,20 @@ pub const OUTPUT_NAMES: [&str; NUM_OUTPUTS] = [
 pub struct MyMetaParams {
     pub max_generations: usize, // 100_000
     pub games_per_net: usize, // 10
+    pub generations_between_events: usize, // 25
     pub meta: PopulationParams,
 }
 
 pub struct StashInfo {
-    pub net: Net,
+    pub net: Net<FitnessInfo>,
     pub generation: usize,
 }
 
 pub struct NnPlaysSnake {
     game: SnakeGame,
     my_meta: MyMetaParams,
-    population: Population,
-    max_info: MaxInfo,
+    population: Population<FitnessInfo>,
+    max_info: FitnessInfo,
     stashed_nets: Vec<StashInfo>,
 }
 
@@ -113,6 +122,7 @@ impl NnPlaysSnake {
         let my_meta = MyMetaParams {
             max_generations: 100_000,
             games_per_net: 10,
+            generations_between_events: 25,
             meta: PopulationParams {
                 population_size: 1_000,
                 net_params: NetParams {
@@ -137,7 +147,7 @@ impl NnPlaysSnake {
             game: SnakeGame::new(None),
             my_meta: my_meta.clone(),
             population: Population::new(my_meta.meta),
-            max_info: MaxInfo::default(),
+            max_info: FitnessInfo::default(),
             stashed_nets: Vec::new(),
         }
     }
@@ -154,7 +164,10 @@ impl NnPlaysSnake {
             if count_in_stash != stash_population_last || (generation % 10) == 0 {
                 stash_population_last = count_in_stash;
                 let n = &self.population.nets[0];
-                println!("Best for gen {generation}: {}: fitness={}; population from stash: {count_in_stash} ({:.1}%)", n.id, n.fitness, 100.0 * count_in_stash as f32 / self.stashed_nets.len() as f32);
+                println!("Best for gen {generation}: {}: fitness={}; population from stash: {count_in_stash} ({:.1}%)", n.id, n.fitness.fitness, 100.0 * count_in_stash as f32 / self.stashed_nets.len() as f32);
+            }
+            if (generation % self.my_meta.generations_between_events) == 0 {
+                //self.pick_and_apply_event();
             }
         }
     }
@@ -165,7 +178,7 @@ impl NnPlaysSnake {
         let game = &mut self.game;
         let mut global_max_fitness = self.max_info.fitness;
         pop.run_one_generation(multiplier, |net| {
-            if net.fitness != f32::MIN { return net.fitness; }  // If we've already computed this Net's fitness, just use that
+            if net.fitness.fitness != f32::MIN { return net.fitness.clone(); }  // If we've already computed this Net's fitness, just use that
             let mut max_single_game_fitness = f32::MIN;
             let mut moves_at_single_max_fitness = 0;
             let mut apples_at_single_max_fitness = 0;
@@ -183,7 +196,7 @@ impl NnPlaysSnake {
             }
             let ave_fitness = sum_fitnesses / games_played_for_fitness as f32;
             let final_net_fitness = max_single_game_fitness * 0.75 + ave_fitness * 0.25;
-            net.fitness = final_net_fitness;
+            net.fitness.fitness = final_net_fitness;
             if global_max_fitness < final_net_fitness {
                 println!("New Max gen={generation}: {}: fitness={final_net_fitness} (max={max_single_game_fitness} with moves={moves_at_single_max_fitness}, apples={apples_at_single_max_fitness}, visited={visited_at_single_max_fitness})    multiplier={multiplier}", net.id);
                 global_max_fitness = final_net_fitness;
@@ -192,12 +205,12 @@ impl NnPlaysSnake {
                     generation,
                 });
             }
-        final_net_fitness
+            FitnessInfo { fitness: final_net_fitness }
         });
         self.max_info.fitness = global_max_fitness;
     }
 
-    pub fn run_one_game(net: &mut Net, game: &mut SnakeGame) -> (usize, f32) {
+    pub fn run_one_game(net: &mut Net<FitnessInfo>, game: &mut SnakeGame) -> (usize, f32) {
         game.restart(None);
         let mut moves = 0_usize;
         while game.state == GameState::Running {
@@ -220,7 +233,7 @@ impl NnPlaysSnake {
         (moves, fitness)
     }
     
-    fn interpret_outputs(net: &Net) -> Direction {
+    fn interpret_outputs(net: &Net<FitnessInfo>) -> Direction {
         let outputs = net.get_outputs();
         let mut i_max = 0;
         let mut v_max = f32::MIN;
@@ -239,7 +252,7 @@ impl NnPlaysSnake {
         }
     }
 
-    fn collect_and_apply_inputs(net: &mut Net, game: &SnakeGame) {
+    fn collect_and_apply_inputs(net: &mut Net<FitnessInfo>, game: &SnakeGame) {
         let (wall_dist, snake_dist) = game.wall_and_body_distances();
         let pt_snake_head = game.snake.head_location;
         let pt_apple = game.apple.location;
@@ -261,4 +274,14 @@ impl NnPlaysSnake {
         ];
         net.set_inputs(&inputs);
     }
+    
+    //fn pick_and_apply_event(&mut self) {
+    //    
+    //}
+    //
+    //fn event_cataclism_remove_fewest_visited(&mut self) {
+    //    for n in self.population.nets.iter() {
+    //        
+    //    }
+    //}
 }

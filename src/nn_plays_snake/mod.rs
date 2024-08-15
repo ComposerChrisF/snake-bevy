@@ -122,7 +122,7 @@ impl std::ops::AddAssign<&Self> for MyFitnessInfo {
 
 
 #[derive(Copy, Clone, Debug)]
-enum EraFitness {
+pub enum EraFitness {
     Normal = 0,
     FavorVisits,
     FavorMoves,
@@ -246,7 +246,7 @@ impl NnPlaysSnake {
         for generation in 0..self.my_meta.max_generations {
             let era_info = self.eras_since_last_max(generation);
             if era_info.eras > 0 && era_info.is_era_boundary {
-                println!("***** NEW ERA ***** {}:{}", era_info.fitness_kind, era_info.eras);
+                println!("***** NEW ERA ***** {:?}:{}", era_info.fitness_kind, era_info.eras);
                 self.pick_and_apply_event(era_info.eras);
             }
             self.run_one_generation(generation, &era_info, self.my_meta.games_per_net);
@@ -318,13 +318,12 @@ impl NnPlaysSnake {
         // gets reset every apple (so points_visited is monotonically increasing).
         let apples  = game.apples_eaten;
         let visited = game.points_visited;
-        let fitness_info = MyFitnessInfo { 
+        MyFitnessInfo { 
             fitness: Self::compute_fitness(era_info, apples, visited, moves),
             apples:  apples  as f32,
             visited: visited as f32,
             moves:   moves   as f32,
-        };
-        fitness_info
+        }
     }
 
 

@@ -312,8 +312,11 @@ impl Net {
         }
     }
 
+    fn adjust_prob(p: f64, adjuster: f64) -> f64 {
+        f64::min(1.0, p * adjuster)
+    }
     
-    pub(super) fn cross_into_new_net(&self, other: &Self, mut_params: &MutationParams) -> Self {
+    pub(super) fn cross_into_new_net(&self, other: &Self, mut_params: &MutationParams, mutation_multiplier: f64) -> Self {
         // Choose a "winning" parent, partially based on fitnesses
         let (winner, loser) = match thread_rng().gen_range(0..4) {
             0 => if thread_rng().gen_bool(0.5)    { (self, other) } else { (other, self) }, // 25% of the time, choose randomly
@@ -331,7 +334,7 @@ impl Net {
             map_node_id_to_index: HashMap::with_capacity(max_node_count),
             connections: Vec::with_capacity(max_connection_count),
             map_connection_id_to_index: HashMap::with_capacity(max_connection_count),
-            fitness: 0.0,
+            fitness: f32::MIN,
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
         };
@@ -339,7 +342,7 @@ impl Net {
 
         // Remove a node by selecting one NOT to copy!
         let mut node_id_dont_copy: Option<NodeId> = None;
-        if thread_rng().gen_bool(mut_params.prob_remove_node) {
+        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_remove_node, mutation_multiplier)) {
             let hidden = winner.nodes.iter().filter_map(|n| if let Layer::Hidden(_) = n.layer { Some(n.id) } else { None }).collect::<Vec<_>>();
             if let Some(&x) = hidden.choose(&mut thread_rng()) {
                 node_id_dont_copy = Some(x);
@@ -348,7 +351,7 @@ impl Net {
 
         // Remove a connection by selecting one NOT to copy!
         let mut connection_id_dont_copy: Option<ConnectionId> = None;
-        if thread_rng().gen_bool(mut_params.prob_remove_connection) {
+        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_remove_connection, mutation_multiplier)) {
             if let Some(x) = winner.connections.choose(&mut thread_rng()) {
                 connection_id_dont_copy = Some(x.id);
             }
@@ -406,7 +409,7 @@ impl Net {
         net_child.verify_invariants();
 
         trace!("NET: {net_child:#?}");
-        net_child.mutate_self(mut_params);
+        net_child.mutate_self(mut_params, mutation_multiplier);
         net_child
     }
 
@@ -486,13 +489,13 @@ impl Net {
     }
 
 
-    pub(super) fn mutate_self(&mut self, mut_params: &MutationParams) {
+    pub(super) fn mutate_self(&mut self, mut_params: &MutationParams, mutation_multiplier: f64) {
         let node_index_list   = self.nodes.iter().map(|n| n.index).collect::<Vec<_>>();
         let input_and_hidden  = self.nodes.iter().filter_map(|n| if n.layer != Layer::Output && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
         let hidden_and_output = self.nodes.iter().filter_map(|n| if n.layer != Layer::Input  && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
 
         // Change node's activation function
-        if thread_rng().gen_bool(mut_params.prob_mutate_activation_function_of_node) && !node_index_list.is_empty() {
+        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_mutate_activation_function_of_node, mutation_multiplier)) && !node_index_list.is_empty() {
             trace!("Mutating node activation function");
             let node_mutate = self.get_node_mut(Self::choose_index(&node_index_list));
             if node_mutate.layer != Layer::Input { node_mutate.activation_function = ActivationFunction::choose_random(); }
@@ -500,21 +503,21 @@ impl Net {
 
         // Change a connection's weight
         let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
-        if thread_rng().gen_bool(mut_params.prob_mutate_weight) && !connection_index_list.is_empty() {
+        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_mutate_weight, mutation_multiplier)) && !connection_index_list.is_empty() {
             trace!("Mutating connection weight");
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.weight += (thread_rng().gen::<f32>() * 2.0 - 1.0) * mut_params.max_weight_change_magnitude;
         }
 
         // Toggle a conneciton's is_enabled
-        if thread_rng().gen_bool(mut_params.prob_toggle_enabled) && !connection_index_list.is_empty() {
+        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_toggle_enabled, mutation_multiplier)) && !connection_index_list.is_empty() {
             trace!("Mutating connection is_enabled");
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.is_enabled = !connection_mutate.is_enabled;
         }
 
         // Add a connection
-        if thread_rng().gen_bool(mut_params.prob_add_connection) && input_and_hidden.len() > 1 {
+        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_add_connection, mutation_multiplier)) && input_and_hidden.len() > 1 {
             let mut index_from = Self::choose_index(&input_and_hidden);
             let mut index_to   = Self::choose_index_not(&hidden_and_output, index_from);
             let from = self.get_node(index_from);
@@ -557,7 +560,7 @@ impl Net {
         // made a new connection between two nodes in the same hidden layer
 
         // Add node
-        if thread_rng().gen_bool(mut_params.prob_add_node) && !connection_index_list.is_empty() {
+        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_add_node, mutation_multiplier)) && !connection_index_list.is_empty() {
             // Choose a random Connection, and split it into two, inserting the new node inbetween 
             // and setting old.is_enabled = false
             let connection_index_old = Self::choose_index(&connection_index_list);
@@ -667,19 +670,19 @@ mod tests {
         let mut param_mutate_af      = params.clone();  param_mutate_af     .prob_mutate_activation_function_of_node = 1.0;
 
         let mut net = Net::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_add_connection);
+        net.mutate_self(&param_add_connection, 1.0);
 
         let mut net = Net::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_add_node);
+        net.mutate_self(&param_add_node, 1.0);
 
         let mut net = Net::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_toggle_enabled);
+        net.mutate_self(&param_toggle_enabled, 1.0);
 
         let mut net = Net::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_mutate_weight);
+        net.mutate_self(&param_mutate_weight, 1.0);
 
         let mut net = Net::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_mutate_af);
+        net.mutate_self(&param_mutate_af, 1.0);
     }
 
     #[test]
@@ -697,7 +700,7 @@ mod tests {
             prob_remove_node: 0.0,
         };
         for _ in 0..100 {
-            net.mutate_self(&params);
+            net.mutate_self(&params, 1.0);
         }
         info!("Mutated Net = {net:#?}");
     }
@@ -721,8 +724,8 @@ mod tests {
                 prob_remove_node: 0.0,
             };
             for _ in 0..5 {
-                net_a.mutate_self(&params);
-                net_b.mutate_self(&params);
+                net_a.mutate_self(&params, 1.0);
+                net_b.mutate_self(&params, 1.0);
             }
             let params = MutationParams {
                 prob_add_connection: 0.0,
@@ -734,7 +737,7 @@ mod tests {
                 prob_remove_connection: 0.0,
                 prob_remove_node: 1.0,
             };
-            let net_d = net_a.cross_into_new_net(&net_b, &params);
+            let net_d = net_a.cross_into_new_net(&net_b, &params, 1.0);
             let nodes_a = net_a.nodes.len();
             let nodes_b = net_b.nodes.len();
             let nodes_d = net_d.nodes.len();
@@ -762,8 +765,8 @@ mod tests {
                 prob_remove_node: 0.0,
             };
             for _ in 0..5 {
-                net_a.mutate_self(&params);
-                net_b.mutate_self(&params);
+                net_a.mutate_self(&params, 1.0);
+                net_b.mutate_self(&params, 1.0);
             }
             let params = MutationParams {
                 prob_add_connection: 0.0,
@@ -775,7 +778,7 @@ mod tests {
                 prob_remove_connection: 1.0,
                 prob_remove_node: 0.0,
             };
-            let net_c = net_a.cross_into_new_net(&net_b, &params);
+            let net_c = net_a.cross_into_new_net(&net_b, &params, 1.0);
             let connections_a = net_a.connections.len();
             let connections_b = net_b.connections.len();
             let connections_c = net_c.connections.len();

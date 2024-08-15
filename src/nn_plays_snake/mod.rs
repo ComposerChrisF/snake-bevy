@@ -19,8 +19,8 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 // - Add originating NetId into ConnectionId (and NodeId)?  So we can trace geneology?
 // - Mark Nets with a GUID for easy long-term identification
 // - When population stagnates (e.g. 100 generations without new highest fitness):
-//      - Always stash newest best fitness when above, say, 100 generations
-//      - Increase mutations
+//      x Always stash newest best fitness]
+//      x Increase mutations
 //      - If population has already been rebooted x times, then seed next generation from the 
 //          stash instead of usual best from prev generation; reset reboot counter
 //      - Stash top 5% or so, and reboot population
@@ -30,10 +30,10 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //              - only max
 //              - only ave
 //              - only min
-//          - Change weighing of apples vs. uniqely visited squares vs. movement
+//          x Change weighing of apples vs. uniqely visited squares vs. movement
 //              - e.g. for a while (100 generations?) make visiting unique sqares most important, then apples, then moves
 //          - Add severe penalty for Hidden node count or moves or moves beyond unique ones
-//          - Also, choose to keep (or not to keep) fitness once computed
+//          x Also, keep fitness once computed, but clear every era (i.e. when fitness function changes)
 //          - Vary mutations rate: multiplier of 1.0, 2.0, 5.0, 0.2 for a while (100 generations?)
 //          - Vary population size
 //      - CONSIDER: Instead of varying fitness function, per se, how about periodic cataclisms or
@@ -46,13 +46,13 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //          - Bouns: Resurection of stashed best Nets, but with their fitness re-evaluated.
 //          - Bouns: Resurection of stashed best Nets, but with all of their weights tweaked.
 // - Add multi-threading for running generations
-
+// - Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
 
 #[derive(Copy, Clone)]
 pub struct MyFitnessInfo {
     fitness: f32,
-    visited: f32,
     apples:  f32,
+    visited: f32,
     moves:   f32,
     //net_id: Option<NetId>,
 }
@@ -61,8 +61,8 @@ impl Default for MyFitnessInfo {
     fn default() -> Self {
         MyFitnessInfo {
             fitness: f32::MIN,
-            visited: 0.0,
             apples:  0.0,
+            visited: 0.0,
             moves:   0.0,
             //net_id: None,
         }
@@ -121,6 +121,21 @@ impl std::ops::AddAssign<&Self> for MyFitnessInfo {
 }
 
 
+#[derive(Copy, Clone, Debug)]
+enum EraFitness {
+    Normal = 0,
+    FavorVisits,
+    FavorMoves,
+}
+
+
+#[derive(Copy, Clone, Debug)]
+pub struct EraInfo {
+    pub generations: usize,
+    pub eras: usize,
+    pub is_era_boundary: bool,
+    pub fitness_kind: EraFitness,
+}
 
 
 #[allow(clippy::identity_op)]
@@ -205,37 +220,65 @@ impl NnPlaysSnake {
         }
     }
 
-    pub fn gen_count_since_last_max(&self, generation: usize) -> usize {
-        if self.stashed_nets.is_empty() { 0 } else { generation - self.stashed_nets[self.stashed_nets.len() - 1].generation }
+    fn compute_era_fitness(eras: usize) -> EraFitness {
+        match eras % 3 {
+            0 => EraFitness::Normal,
+            1 => EraFitness::FavorVisits,
+            2 => EraFitness::FavorMoves,
+            _ => panic!()
+        }
+    }
+
+    pub fn eras_since_last_max(&self, generation: usize) -> EraInfo {
+        let generation_of_max = if self.stashed_nets.is_empty() { 0 } else { self.stashed_nets[self.stashed_nets.len() - 1].generation };
+        let gens_since_max = generation - generation_of_max;
+        let eras = gens_since_max / 100;
+        EraInfo {
+            generations: gens_since_max,
+            eras,                                           // TODO: Make 100 a metaparam
+            is_era_boundary: (gens_since_max % 100) == 0,   // TODO: Make 100 a metaparam
+            fitness_kind: Self::compute_era_fitness(eras),
+        }
     }
 
     pub fn run_x_generations(&mut self) {
         let mut stash_population_last = 0;
         for generation in 0..self.my_meta.max_generations {
-            self.run_one_generation(generation, self.my_meta.games_per_net);
+            let era_info = self.eras_since_last_max(generation);
+            if era_info.eras > 0 && era_info.is_era_boundary {
+                println!("***** NEW ERA ***** {}:{}", era_info.fitness_kind, era_info.eras);
+                self.pick_and_apply_event(era_info.eras);
+            }
+            self.run_one_generation(generation, &era_info, self.my_meta.games_per_net);
             let count_in_stash = self.population.nets.iter().filter(|n| self.stashed_nets.iter().any(|b| n.id == b.net.id)).count();
             if count_in_stash != stash_population_last || (generation % 10) == 0 {
                 stash_population_last = count_in_stash;
                 let n = &self.population.nets[0];
-                println!("Best for gen {generation}: {}: fitness={}; population from stash: {count_in_stash} ({:.1}%)", n.id, n.fitness_info, 100.0 * count_in_stash as f32 / self.stashed_nets.len() as f32);
-            }
-            if (generation % self.my_meta.generations_between_events) == 0 {
-                self.pick_and_apply_event();
+                println!("Best for gen {generation}: {}: fitness={}; {count_in_stash} ({:.1}%)", n.id, n.fitness_info, 100.0 * count_in_stash as f32 / self.stashed_nets.len() as f32);
             }
         }
     }
 
-    pub fn run_one_generation(&mut self, generation: usize, games_played_for_fitness: usize) {
-        let multiplier = if self.gen_count_since_last_max(generation) > 100 { 2.0 } else { 1.0 };
+    pub fn run_one_generation(&mut self, generation: usize, era_info: &EraInfo, games_played_for_fitness: usize) {
+        let multiplier = 1.0 + era_info.eras as f64;
         let pop  = &mut self.population;
         let game = &mut self.game;
         let mut global_max_fitness_info = self.max_info;
         pop.run_one_generation(multiplier, |net| {
-            if net.fitness_info.fitness != f32::MIN { return net.fitness_info; }  // If we've already computed this Net's fitness, just use that
+            // If we've already computed this Net's fitness, just use that, unless...
+            if net.fitness_info.fitness != f32::MIN { 
+                // ...unless it's an era boundary, in which case the fitness function might
+                // change, so let's re-evaluate then.
+                if era_info.is_era_boundary {
+                    net.fitness_info.fitness = f32::MIN;
+                } else {
+                    return net.fitness_info;
+                }
+            }
             let mut max_single_game_fitness_info = MyFitnessInfo::default();
             let mut sum_fitnesses_info = MyFitnessInfo { fitness: 0.0, ..Default::default() };
             for _ in 0..games_played_for_fitness {
-                let single_game_fitness_info = Self::run_one_game(net, game);
+                let single_game_fitness_info = Self::run_one_game(net, game, era_info);
                 if max_single_game_fitness_info.fitness < single_game_fitness_info.fitness { 
                     max_single_game_fitness_info = single_game_fitness_info; 
                 }
@@ -245,7 +288,7 @@ impl NnPlaysSnake {
             let final_net_fitness_info = max_single_game_fitness_info * 0.75 + ave_fitness_info * 0.25;
             net.fitness_info = final_net_fitness_info;
             if global_max_fitness_info.fitness < final_net_fitness_info.fitness {
-                println!("New Max gen={generation}:  {}: fitness={final_net_fitness_info}; max={max_single_game_fitness_info}    multiplier={multiplier}", net.id);
+                println!("New Max  gen={generation}: {}: fitness={final_net_fitness_info}; max={max_single_game_fitness_info}    multiplier={multiplier}", net.id);
                 global_max_fitness_info = final_net_fitness_info;
                 self.stashed_nets.push(StashInfo { 
                     net: net.clone(), 
@@ -257,7 +300,7 @@ impl NnPlaysSnake {
         self.max_info = global_max_fitness_info;
     }
 
-    pub fn run_one_game(net: &mut Net<MyFitnessInfo>, game: &mut SnakeGame) -> MyFitnessInfo {
+    pub fn run_one_game(net: &mut Net<MyFitnessInfo>, game: &mut SnakeGame, era_info: &EraInfo) -> MyFitnessInfo {
         game.restart(None);
         let mut moves = 0_usize;
         while game.state == GameState::Running {
@@ -268,21 +311,46 @@ impl NnPlaysSnake {
             game.move_snake(dir, None);
             if apples_before != game.apples_eaten { game.clear_visited(); }
             moves += 1;
-            if moves > 500 + game.points_visited { break; }
+            // Bail early if nothing is happening for too long
+            if moves > 500 + game.points_visited + apples_before * (1 + SnakeGame::GROW_INCREMENT) { break; }
         }
         // Fitness now includes # unique squares visited, where what's considered unique
         // gets reset every apple (so points_visited is monotonically increasing).
-        let apples = game.apples_eaten;
-        let adjustment = if apples < 2 { -1.0 } else { 1.0 }; 
+        let apples  = game.apples_eaten;
         let visited = game.points_visited;
-        let fitness = (10_000 * apples) as f32 
-            - adjustment * 0.001 * ((moves - visited) as f32 / (apples + 1) as f32)
-            + visited as f32;
-        MyFitnessInfo { 
-            fitness,
-            visited: visited as f32,
+        let fitness_info = MyFitnessInfo { 
+            fitness: Self::compute_fitness(era_info, apples, visited, moves),
             apples:  apples  as f32,
+            visited: visited as f32,
             moves:   moves   as f32,
+        };
+        fitness_info
+    }
+
+
+    fn compute_fitness(era_info: &EraInfo, apples: usize, visited: usize, moves: usize) -> f32 {
+        let apples  = apples  as f32;   // Typical max is 9
+        let visited = visited as f32;   // Typical max is 1000
+        let moves   = moves   as f32;   // Typical max is 1300
+        let excess_moves = moves - visited;
+        match era_info.fitness_kind {
+            EraFitness::Normal => {
+                // The "normal" fitness function
+                10_000.0 * apples
+                +    1.0 * visited
+                -    0.1 * (excess_moves / (apples + 1.0))
+            }
+            EraFitness::FavorVisits => {
+                // Favor visiting new spaces
+                1_000.0 * apples
+                +  60.0 * visited
+                -   1.0 * excess_moves
+            }
+            EraFitness::FavorMoves => {
+                // Favor moves
+                1_000.0 * apples
+                +  50.0 * moves
+            }
         }
     }
     
@@ -328,13 +396,18 @@ impl NnPlaysSnake {
         net.set_inputs(&inputs);
     }
     
-    fn pick_and_apply_event(&mut self) {
-        
+
+    // EVENTS
+    fn pick_and_apply_event(&mut self, eras_since_max: usize) {
+        match eras_since_max {
+            4 => self.event_cataclism_remove_fewest_visited(),
+            _ => {},
+        }
     }
 
-    //fn event_cataclism_remove_fewest_visited(&mut self) {
-    //    for n in self.population.nets.iter() {
-    //        
-    //    }
-    //}
+    fn event_cataclism_remove_fewest_visited(&mut self) {
+        for _n in self.population.nets.iter() {
+            
+        }
+    }
 }

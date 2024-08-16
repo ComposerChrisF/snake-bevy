@@ -108,19 +108,19 @@ pub struct MutationParams {
 
 
 #[derive(Clone, Debug)]
-pub struct Net<F> where F: FitnessInfo {
+pub struct Net<Fit> where Fit: FitnessInfo {
     pub id: NetId,
     pub net_params: NetParams,
     nodes: Vec<Node>,
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
     connections: Vec<Connection>,
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
-    pub fitness_info: F,
+    pub fitness_info: Fit,
     pub is_evaluation_order_up_to_date: bool,
     node_order_list: Vec<NodeIndex>,
 }
 
-impl <F> Net<F> where F: FitnessInfo {
+impl <Fit> Net<Fit> where Fit: FitnessInfo {
     pub fn get_node(&self, i: NodeIndex) -> &Node {
         assert_eq!(i.0, self.id);
         &self.nodes[i.1]
@@ -182,7 +182,7 @@ impl <F> Net<F> where F: FitnessInfo {
             map_node_id_to_index: HashMap::<NodeId, NodeIndex>::with_capacity(capacity),
             connections: Vec::with_capacity(capacity),
             map_connection_id_to_index: HashMap::with_capacity(capacity),
-            fitness_info: F::default(),
+            fitness_info: Fit::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::with_capacity(capacity),
         };
@@ -332,7 +332,7 @@ impl <F> Net<F> where F: FitnessInfo {
             map_node_id_to_index: HashMap::with_capacity(max_node_count),
             connections: Vec::with_capacity(max_connection_count),
             map_connection_id_to_index: HashMap::with_capacity(max_connection_count),
-            fitness_info: F::default(),
+            fitness_info: Fit::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
         };

@@ -24,7 +24,7 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //      - If population has already been rebooted x times, then seed next generation from the 
 //          stash instead of usual best from prev generation; reset reboot counter
 //      - Stash top 5% or so, and reboot population
-//      - CONSIDER: Using NEAT approach to retaining genetically distinct Nets in population?
+//      !!! CONSIDER: Using NEAT approach to retaining genetically distinct Nets in population?
 //      - CONSIDER: Using different fitness functions to create diversity, e.g.:
 //          - Instead of 75% max + 25% ave, use
 //              - only max

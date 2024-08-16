@@ -26,20 +26,20 @@ impl FitnessInfo for f32 {
 }
 
 
-pub struct Population<F> where F: FitnessInfo {
-    pub nets: Vec<Net<F>>,
+pub struct Population<Fit> where Fit: FitnessInfo {
+    pub nets: Vec<Net<Fit>>,
     pub population_params: PopulationParams,
 }
 
-impl <F> Population<F> where F: FitnessInfo {
+impl <Fit> Population<Fit> where Fit: FitnessInfo {
     pub fn new(meta: PopulationParams) -> Self {
         Self {
-            nets: Vec::<Net<F>>::new(),
+            nets: Vec::<Net<Fit>>::new(),
             population_params: meta,
         }
     }
 
-    pub fn run_one_generation(&mut self, mutation_multipier: f64, fitness_of_net: impl FnMut(&mut Net<F>) -> F) {
+    pub fn run_one_generation(&mut self, mutation_multipier: f64, fitness_of_net: impl FnMut(&mut Net<Fit>) -> Fit) {
         self.create_initial_population();
         self.evaluate_population(fitness_of_net);
         self.create_next_generation(mutation_multipier);
@@ -55,7 +55,7 @@ impl <F> Population<F> where F: FitnessInfo {
         }
     }
 
-    pub fn evaluate_population(&mut self, mut f: impl FnMut(&mut Net<F>) -> F) {
+    pub fn evaluate_population(&mut self, mut f: impl FnMut(&mut Net<Fit>) -> Fit) {
         for net in self.nets.iter_mut() {
             net.fitness_info = f(net);
         }
@@ -86,7 +86,7 @@ impl <F> Population<F> where F: FitnessInfo {
         }
 
         // Forward propigate most fit nets
-        let mut nets_new = Vec::<Net<F>>::with_capacity(self.nets.len());
+        let mut nets_new = Vec::<Net<Fit>>::with_capacity(self.nets.len());
         for i in 0..4 {
             nets_new.push(self.nets[i].clone());
             nets_already_chosen.insert(self.nets[i].id);
@@ -118,6 +118,7 @@ impl <F> Population<F> where F: FitnessInfo {
         while nets_new.len() < self.population_params.population_size {
             let net_chosen_a = &self.nets[self.choose(points_sum, &net_points)];
             let net_chosen_b = &self.nets[self.choose(points_sum, &net_points)];
+            if std::ptr::addr_eq(net_chosen_a, net_chosen_b) { continue; }  // Skip if same
             let net_new = net_chosen_a.cross_into_new_net(net_chosen_b, &self.population_params.mutation_params, mutation_multipier);
             nets_new.push(net_new);
         }

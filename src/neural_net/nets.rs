@@ -20,7 +20,7 @@ static NET_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 /// The NetId uniquely identifies an instance of a Net.  Used for debug checks to ensure node and
 /// connection indexes can only be used for the Net that generated them.
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct NetId(usize);
+pub struct NetId(pub usize);
 
 impl NetId {
     pub fn new_unique() -> NetId {
@@ -97,8 +97,10 @@ impl NetParams {
 pub struct MutationParams {
     pub prob_mutate_activation_function_of_node: f64,
     pub prob_mutate_weight: f64,
-    pub max_weight_change_magnitude: f32,
+    pub prob_reset_weight_when_mutating: f64,
+    pub max_weight_change_frac: f32,
     pub prob_toggle_enabled: f64,
+
     pub prob_remove_connection: f64,
     pub prob_add_connection: f64,
     pub prob_remove_node: f64,
@@ -492,22 +494,38 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         let input_and_hidden  = self.nodes.iter().filter_map(|n| if n.layer != Layer::Output && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
         let hidden_and_output = self.nodes.iter().filter_map(|n| if n.layer != Layer::Input  && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
 
-        // Change node's activation function
+        // Change a single node's activation function
         if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_mutate_activation_function_of_node, mutation_multiplier)) && !node_index_list.is_empty() {
             trace!("Mutating node activation function");
             let node_mutate = self.get_node_mut(Self::choose_index(&node_index_list));
             if node_mutate.layer != Layer::Input { node_mutate.activation_function = ActivationFunction::choose_random(); }
         }
 
-        // Change a connection's weight
-        let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
-        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_mutate_weight, mutation_multiplier)) && !connection_index_list.is_empty() {
-            trace!("Mutating connection weight");
-            let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
-            connection_mutate.weight += (thread_rng().gen::<f32>() * 2.0 - 1.0) * mut_params.max_weight_change_magnitude;
+        // Change all connections' weight
+        for connection_mutate in self.connections.iter_mut() {
+            if thread_rng().gen_bool(mut_params.prob_reset_weight_when_mutating) {
+                connection_mutate.weight = thread_rng().gen::<f32>() * 2.0 - 1.0;
+            } else {
+                // 0>=max_weight_change_frac>1.0 i.e. w *= (1.0 - rand_between(0.0, max_weight_change_frac)).pow(+/-1.0)
+                let pow = if thread_rng().gen_bool(0.5) { 1.0 } else { -1.0 };
+                connection_mutate.weight *= (1.0 - (thread_rng().gen::<f32>() * mut_params.max_weight_change_frac)).powf(pow);
+            }
         }
+        //let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
+        //if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_mutate_weight, mutation_multiplier)) && !connection_index_list.is_empty() {
+        //    trace!("Mutating connection weight");
+        //    let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
+        //    if thread_rng().gen_bool(mut_params.prob_reset_weight_when_mutating) {
+        //        connection_mutate.weight = thread_rng().gen::<f32>() * 2.0 - 1.0;
+        //    } else {
+        //        // 0>=max_weight_change_frac>1.0 i.e. w *= (1.0 - rand_between(0.0, max_weight_change_frac)).pow(+/-1.0)
+        //        let pow = if thread_rng().gen_bool(0.5) { 1.0 } else { -1.0 };
+        //        connection_mutate.weight *= (1.0 - (thread_rng().gen::<f32>() * mut_params.max_weight_change_frac)).powf(pow);
+        //    }
+        //}
 
         // Toggle a conneciton's is_enabled
+        let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
         if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_toggle_enabled, mutation_multiplier)) && !connection_index_list.is_empty() {
             trace!("Mutating connection is_enabled");
             let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
@@ -656,7 +674,8 @@ mod tests {
             prob_add_node: 0.0,
             prob_mutate_activation_function_of_node: 0.0,
             prob_mutate_weight: 0.0,
-            max_weight_change_magnitude: 0.0,
+            prob_reset_weight_when_mutating: 0.0,
+            max_weight_change_frac: 0.0,
             prob_toggle_enabled: 0.0,
             prob_remove_connection: 0.0,
             prob_remove_node: 0.0,
@@ -664,7 +683,8 @@ mod tests {
         let mut param_add_connection = params.clone();  param_add_connection.prob_add_connection = 1.0;
         let mut param_add_node       = params.clone();  param_add_node      .prob_add_node       = 1.0;
         let mut param_toggle_enabled = params.clone();  param_toggle_enabled.prob_toggle_enabled = 1.0;
-        let mut param_mutate_weight  = params.clone();  param_mutate_weight .prob_mutate_weight  = 1.0;   param_mutate_weight.max_weight_change_magnitude = 5.0;
+        let mut param_mutate_weight  = params.clone();  param_mutate_weight .prob_mutate_weight  = 1.0;   param_mutate_weight.prob_reset_weight_when_mutating = 1.0;
+        let mut param_mutate_weight2 = params.clone();  param_mutate_weight2.prob_mutate_weight  = 1.0;   param_mutate_weight2.max_weight_change_frac = 0.1;
         let mut param_mutate_af      = params.clone();  param_mutate_af     .prob_mutate_activation_function_of_node = 1.0;
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
@@ -680,6 +700,9 @@ mod tests {
         net.mutate_self(&param_mutate_weight, 1.0);
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
+        net.mutate_self(&param_mutate_weight2, 1.0);
+
+        let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_mutate_af, 1.0);
     }
 
@@ -692,7 +715,8 @@ mod tests {
             prob_add_node: 0.1,
             prob_mutate_activation_function_of_node: 0.1,
             prob_mutate_weight: 0.1,
-            max_weight_change_magnitude: 1.0,
+            prob_reset_weight_when_mutating: 0.1,
+            max_weight_change_frac: 0.1,
             prob_toggle_enabled: 0.1,
             prob_remove_connection: 0.0,
             prob_remove_node: 0.0,
@@ -716,7 +740,8 @@ mod tests {
                 prob_add_node: 1.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
-                max_weight_change_magnitude: 1.0,
+                prob_reset_weight_when_mutating: 0.0,
+                max_weight_change_frac: 0.1,
                 prob_toggle_enabled: 0.0,
                 prob_remove_connection: 0.0,
                 prob_remove_node: 0.0,
@@ -730,7 +755,8 @@ mod tests {
                 prob_add_node: 0.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
-                max_weight_change_magnitude: 1.0,
+                prob_reset_weight_when_mutating: 0.0,
+                max_weight_change_frac: 0.1,
                 prob_toggle_enabled: 0.0,
                 prob_remove_connection: 0.0,
                 prob_remove_node: 1.0,
@@ -757,7 +783,8 @@ mod tests {
                 prob_add_node: 1.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
-                max_weight_change_magnitude: 1.0,
+                prob_reset_weight_when_mutating: 0.0,
+                max_weight_change_frac: 0.1,
                 prob_toggle_enabled: 0.0,
                 prob_remove_connection: 0.0,
                 prob_remove_node: 0.0,
@@ -771,7 +798,8 @@ mod tests {
                 prob_add_node: 0.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
-                max_weight_change_magnitude: 1.0,
+                prob_reset_weight_when_mutating: 0.0,
+                max_weight_change_frac: 0.1,
                 prob_toggle_enabled: 0.0,
                 prob_remove_connection: 1.0,
                 prob_remove_node: 0.0,

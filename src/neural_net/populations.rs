@@ -61,7 +61,7 @@ impl <Fit> Population<Fit> where Fit: FitnessInfo {
         }
     }
 
-    pub fn create_next_generation(&mut self, mutation_multipier: f64) {
+    pub fn create_next_generation(&mut self, mutation_multiplier: f64) {
         // Sort population by fitness
         self.nets.sort_by(|a,b| Ordering::reverse(a.fitness_info.get_fitness().partial_cmp(&b.fitness_info.get_fitness()).unwrap()));
         assert!(self.nets[0].fitness_info.get_fitness() >= self.nets[self.nets.len() - 1].fitness_info.get_fitness());
@@ -72,19 +72,6 @@ impl <Fit> Population<Fit> where Fit: FitnessInfo {
         //    println!("i={i}, id={}, fitness={}", net.id, net.fitness);
         //}
 
-        // Allocate points based on fitness scores
-        let mut fitness_prev = self.nets[0].fitness_info.get_fitness();
-        let mut points_cur = 100.0_f32;
-        let mut points_sum = 0.0_f32;
-        let mut net_points = vec![0.0_f32; self.nets.len()];
-        for (i, net) in self.nets.iter().enumerate() {
-            points_cur *= 1.0 - ((fitness_prev.get_fitness() - net.fitness_info.get_fitness()) / fitness_prev);
-            points_cur = points_cur.max(1.0);
-            fitness_prev = net.fitness_info.get_fitness();
-            net_points[i] = points_cur;
-            points_sum += points_cur;
-        }
-
         // Forward propigate most fit nets
         let mut nets_new = Vec::<Net<Fit>>::with_capacity(self.nets.len());
         for i in 0..4 {
@@ -92,47 +79,36 @@ impl <Fit> Population<Fit> where Fit: FitnessInfo {
             nets_already_chosen.insert(self.nets[i].id);
         }
 
-        // Choose 10% of population randomly from current population, in proportion
-        // to their fitness.
-        let ten_percent = (self.population_params.population_size as f32 * 0.1).round() as usize;
-        let target = 4 + ten_percent;
+        // Choose 25% of population randomly from current population, biased by their fitness
+        // ranking.
+        let percent_25 = (self.population_params.population_size as f32 * 0.25).round() as usize;
+        let target = 4 + percent_25;
+        let mut rechosen_count = 0_usize;
         while nets_new.len() < target {
-            let net_chosen = &self.nets[self.choose(points_sum, &net_points)];
-            if !nets_already_chosen.contains(&net_chosen.id) {
-                nets_new.push(net_chosen.clone());
-                nets_already_chosen.insert(net_chosen.id);
-            }
+            let net_chosen = &self.nets[self.choose()];
+            let is_already_chosen = nets_already_chosen.contains(&net_chosen.id);
+            let new_net = net_chosen.clone();
+            if is_already_chosen { rechosen_count += 1; continue; } // new_net.mutate_self(&self.population_params.mutation_params, mutation_multiplier * 2.0); }
+            nets_new.push(new_net);
+            nets_already_chosen.insert(net_chosen.id);
         }
-
-        // Choose 5% of population completely randomly, without regard for fitness
-        let target = target + ten_percent / 2;
-        while nets_new.len() < target {
-            let net_chosen = &self.nets[thread_rng().gen_range(0..self.nets.len())];
-            if !nets_already_chosen.contains(&net_chosen.id) {
-                nets_new.push(net_chosen.clone());
-                nets_already_chosen.insert(net_chosen.id);
-            }
-        }
+        //println!("Rechosen: {rechosen_count} out of {target}");
 
         // Fill out population by randomly choosing nets to cross proportionally by fitness
         while nets_new.len() < self.population_params.population_size {
-            let net_chosen_a = &self.nets[self.choose(points_sum, &net_points)];
-            let net_chosen_b = &self.nets[self.choose(points_sum, &net_points)];
+            let net_chosen_a = &self.nets[self.choose()];
+            let net_chosen_b = &self.nets[self.choose()];
             if std::ptr::addr_eq(net_chosen_a, net_chosen_b) { continue; }  // Skip if same
-            let net_new = net_chosen_a.cross_into_new_net(net_chosen_b, &self.population_params.mutation_params, mutation_multipier);
+            let net_new = net_chosen_a.cross_into_new_net(net_chosen_b, &self.population_params.mutation_params, mutation_multiplier);
             nets_new.push(net_new);
         }
         self.nets = nets_new;
     }
 
-    // TODO: Replace this with more efficient choosing mechanism
-    fn choose(&self, points_sum: f32, net_points: &[f32]) -> usize {
-        let choice = thread_rng().gen::<f32>() * points_sum;
-        let mut sum = 0.0_f32;
-        for (i, &points_cur) in net_points.iter().enumerate() {
-            sum += points_cur;
-            if sum > choice { return i; }
-        }
-        panic!();
+    fn choose(&self) -> usize {
+        let rand = thread_rng().gen::<f32>();
+        let sq = rand * rand;   // more likely to choose values close to 0.0 than 1.0
+        let index = (sq * self.nets.len() as f32).round() as usize;
+        index.clamp(0, self.nets.len() - 1)
     }
 }

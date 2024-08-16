@@ -47,6 +47,7 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //          - Bouns: Resurection of stashed best Nets, but with all of their weights tweaked.
 // - Add multi-threading for running generations
 // - Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
+// - Look at command line to determine to run the game or to run simulation; at least until refactored into multiple crates and apps!
 
 #[derive(Copy, Clone)]
 pub struct MyFitnessInfo {
@@ -121,7 +122,7 @@ impl std::ops::AddAssign<&Self> for MyFitnessInfo {
 }
 
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum EraFitness {
     Normal = 0,
     FavorVisits,
@@ -134,6 +135,7 @@ pub struct EraInfo {
     pub generations: usize,
     pub eras: usize,
     pub is_era_boundary: bool,
+    pub is_end_special_fitness: bool,
     pub fitness_kind: EraFitness,
 }
 
@@ -185,6 +187,9 @@ impl Default for NnPlaysSnake {
     fn default() -> Self { Self::new() }
 }
 
+pub const ERA_SIZE: usize = 200;
+pub const ERA_FIRST_PORTION_SIZE: usize = 100;
+
 impl NnPlaysSnake {
     pub fn new() -> Self {
         let my_meta = MyMetaParams {
@@ -201,13 +206,14 @@ impl NnPlaysSnake {
                 },
                 mutation_params: MutationParams {
                     prob_add_connection: 0.05,
-                    prob_add_node: 0.05,
-                    prob_mutate_activation_function_of_node: 0.05,
-                    prob_mutate_weight: 0.10,
-                    max_weight_change_magnitude: 1.0,
+                    prob_add_node: 0.03,
+                    prob_mutate_activation_function_of_node: 0.02,
+                    prob_mutate_weight: 0.80,
+                    prob_reset_weight_when_mutating: 0.10,
+                    max_weight_change_frac: 0.10,   // +/- 10% of current value
                     prob_toggle_enabled: 0.025,
-                    prob_remove_connection: 0.01,
-                    prob_remove_node: 0.025,
+                    prob_remove_connection: 0.0, // 0.01,
+                    prob_remove_node: 0.0, // 0.025,
                 },
             },
         };
@@ -220,7 +226,8 @@ impl NnPlaysSnake {
         }
     }
 
-    fn compute_era_fitness(eras: usize) -> EraFitness {
+    fn compute_era_fitness(eras: usize, gens_since_max: usize) -> EraFitness {
+        if (gens_since_max % ERA_SIZE) >= ERA_FIRST_PORTION_SIZE { return EraFitness::Normal; }
         match eras % 3 {
             0 => EraFitness::Normal,
             1 => EraFitness::FavorVisits,
@@ -232,12 +239,13 @@ impl NnPlaysSnake {
     pub fn eras_since_last_max(&self, generation: usize) -> EraInfo {
         let generation_of_max = if self.stashed_nets.is_empty() { 0 } else { self.stashed_nets[self.stashed_nets.len() - 1].generation };
         let gens_since_max = generation - generation_of_max;
-        let eras = gens_since_max / 100;
+        let eras = gens_since_max / ERA_SIZE;
         EraInfo {
             generations: gens_since_max,
-            eras,                                           // TODO: Make 100 a metaparam
-            is_era_boundary: (gens_since_max % 100) == 0,   // TODO: Make 100 a metaparam
-            fitness_kind: Self::compute_era_fitness(eras),
+            eras,
+            is_era_boundary: (gens_since_max % ERA_SIZE) == 0,
+            is_end_special_fitness: (gens_since_max % ERA_SIZE) == ERA_FIRST_PORTION_SIZE,
+            fitness_kind: Self::compute_era_fitness(eras, gens_since_max),
         }
     }
 
@@ -245,9 +253,13 @@ impl NnPlaysSnake {
         let mut stash_population_last = 0;
         for generation in 0..self.my_meta.max_generations {
             let era_info = self.eras_since_last_max(generation);
-            if era_info.eras > 0 && era_info.is_era_boundary {
-                println!("***** NEW ERA ***** {:?}:{}", era_info.fitness_kind, era_info.eras);
-                self.pick_and_apply_event(era_info.eras);
+            if era_info.eras > 0 {
+                if era_info.is_era_boundary {
+                    println!("***** NEW ERA ****************************************** {:?}:{}", era_info.fitness_kind, era_info.eras);
+                    self.pick_and_apply_event(&era_info);
+                } else if era_info.is_end_special_fitness {
+                    println!("----- End Special Fitness ----- {:?}:{}", era_info.fitness_kind, era_info.eras);
+                }
             }
             self.run_one_generation(generation, &era_info, self.my_meta.games_per_net);
             let count_in_stash = self.population.nets.iter().filter(|n| self.stashed_nets.iter().any(|b| n.id == b.net.id)).count();
@@ -287,7 +299,7 @@ impl NnPlaysSnake {
             let ave_fitness_info = sum_fitnesses_info * (1.0 / games_played_for_fitness as f32);
             let final_net_fitness_info = max_single_game_fitness_info * 0.75 + ave_fitness_info * 0.25;
             net.fitness_info = final_net_fitness_info;
-            if global_max_fitness_info.fitness < final_net_fitness_info.fitness {
+            if generation != 0 && global_max_fitness_info.fitness < final_net_fitness_info.fitness {
                 println!("New Max  gen={generation}: {}: fitness={final_net_fitness_info}; max={max_single_game_fitness_info}    multiplier={multiplier}", net.id);
                 global_max_fitness_info = final_net_fitness_info;
                 self.stashed_nets.push(StashInfo { 
@@ -327,6 +339,7 @@ impl NnPlaysSnake {
     }
 
 
+    // TODO: Consider keeping separate set of MAX values for each EraFitness value.
     fn compute_fitness(era_info: &EraInfo, apples: usize, visited: usize, moves: usize) -> f32 {
         let apples  = apples  as f32;   // Typical max is 9
         let visited = visited as f32;   // Typical max is 1000
@@ -342,13 +355,13 @@ impl NnPlaysSnake {
             EraFitness::FavorVisits => {
                 // Favor visiting new spaces
                 1_000.0 * apples
-                +  60.0 * visited
+                +  40.0 * visited
                 -   1.0 * excess_moves
             }
             EraFitness::FavorMoves => {
                 // Favor moves
                 1_000.0 * apples
-                +  50.0 * moves
+                +  30.0 * moves
             }
         }
     }
@@ -378,18 +391,19 @@ impl NnPlaysSnake {
         let pt_apple = game.apple.location;
         let snake_length = game.snake.length();
 
+        // Normalized inputs
         let inputs: [f32; NUM_INPUTS] = [
-            wall_dist[0] as f32,
-            wall_dist[1] as f32,
-            wall_dist[2] as f32,
-            wall_dist[3] as f32,
-            snake_dist[0] as f32,
-            snake_dist[1] as f32,
-            snake_dist[2] as f32,
-            snake_dist[3] as f32,
-            (pt_snake_head.x - pt_apple.x) as f32 ,
-            (pt_snake_head.y - pt_apple.y) as f32 ,
-            snake_length as f32, 
+            wall_dist[0] as f32 / 40.0,
+            wall_dist[1] as f32 / 40.0,
+            wall_dist[2] as f32 / 40.0,
+            wall_dist[3] as f32 / 40.0,
+            snake_dist[0] as f32 / 40.0,
+            snake_dist[1] as f32 / 40.0,
+            snake_dist[2] as f32 / 40.0,
+            snake_dist[3] as f32 / 40.0,
+            (pt_snake_head.x - pt_apple.x) as f32 / 35.0,   // Max distance = RMS(30,40) = 35.36
+            (pt_snake_head.y - pt_apple.y) as f32 / 35.0,
+            snake_length as f32 / 1200.0, 
             1.0
         ];
         net.set_inputs(&inputs);
@@ -397,8 +411,13 @@ impl NnPlaysSnake {
     
 
     // EVENTS
-    fn pick_and_apply_event(&mut self, eras_since_max: usize) {
-        match eras_since_max {
+    fn pick_and_apply_event(&mut self, era_info: &EraInfo) {
+        if era_info.eras > 0 && era_info.is_era_boundary && era_info.fitness_kind == EraFitness::Normal {
+            self.event_resurrect_maxes();
+        }
+        
+        
+        match era_info.eras {
             4 => self.event_cataclism_remove_fewest_visited(),
             _ => {},
         }
@@ -407,6 +426,13 @@ impl NnPlaysSnake {
     fn event_cataclism_remove_fewest_visited(&mut self) {
         for _n in self.population.nets.iter() {
             
+        }
+    }
+    
+    fn event_resurrect_maxes(&mut self) {
+        println!("@@@@ RESURECTION!!! @@@@");
+        for sn in self.stashed_nets.iter() {
+            self.population.nets.push(sn.net.clone());
         }
     }
 }

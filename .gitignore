@@ -5,3 +5,6 @@
 
 # This file contains environment-specific configuration like linker settings
 .cargo/config.toml
+
+# Snake and NN output files
+Net-202*.json

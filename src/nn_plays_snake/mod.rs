@@ -1,8 +1,12 @@
 use core::fmt;
+use std::fs::File;
+use std::io::Write;
+
+use serde::{Deserialize, Serialize};
 
 use crate::neural_net::nets::{Net, NetParams};
 use crate::neural_net::populations::{FitnessInfo, PopulationParams};
-use crate::snake_game::{Direction, GameState, SnakeGame};
+use crate::snake_game::{self, Direction, GameState, SnakeGame};
 use crate::neural_net::{populations::Population, nets::MutationParams};
 
 // TODO list:
@@ -49,7 +53,7 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 // - Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
 // - Look at command line to determine to run the game or to run simulation; at least until refactored into multiple crates and apps!
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct MyFitnessInfo {
     fitness: f32,
     apples:  f32,
@@ -194,10 +198,10 @@ impl NnPlaysSnake {
     pub fn new() -> Self {
         let my_meta = MyMetaParams {
             max_generations: 100_000,
-            games_per_net: 10,
+            games_per_net: 2,
             generations_between_events: 25,
             meta: PopulationParams {
-                population_size: 1_000,
+                population_size: 10_000,
                 net_params: NetParams {
                     input_count: NUM_INPUTS,
                     input_names: Some(&INPUT_NAMES),
@@ -306,6 +310,30 @@ impl NnPlaysSnake {
                     net: net.clone(), 
                     generation,
                 });
+                match serde_json::to_string_pretty(&net) {
+                    Err(e) => { println!("ERROR serializing Net to JSON: {e:#?}"); panic!() }
+                    Ok(s) => {
+                        let gen = generation;
+                        let apples = final_net_fitness_info.apples;
+                        let fitness = final_net_fitness_info.fitness;
+                        let date = chrono::Local::now().format("%Y%m%d");
+                        let filename = format!("stash/Net-{date}-Gen{gen}-Apples{apples}-Fit{fitness:.0}.json");
+                        let mut file = File::create(filename).unwrap();
+                        file.write_all(s.as_bytes()).unwrap();
+                    }
+                }
+                match serde_json::to_string_pretty(&game.playback) {
+                    Err(e) => { println!("ERROR serializing Playback to JSON: {e:#?}"); panic!() }
+                    Ok(s) => {
+                        let gen = generation;
+                        let apples = final_net_fitness_info.apples;
+                        let fitness = final_net_fitness_info.fitness;
+                        let date = chrono::Local::now().format("%Y%m%d");
+                        let filename = format!("stash/Net-{date}-Gen{gen}-Apples{apples}-Fit{fitness:.0}-Playback.json");
+                        let mut file = File::create(filename).unwrap();
+                        file.write_all(s.as_bytes()).unwrap();
+                    }
+                }
             }
             final_net_fitness_info
         });

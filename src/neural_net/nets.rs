@@ -3,6 +3,7 @@ use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
 use bevy::utils::hashbrown::{HashMap, HashSet};
 use log::{debug, trace};
 use rand::{thread_rng, Rng, prelude::SliceRandom};
+use serde::{Deserialize, Serialize};
 
 use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::FitnessInfo};
 
@@ -19,7 +20,7 @@ static NET_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
 /// The NetId uniquely identifies an instance of a Net.  Used for debug checks to ensure node and
 /// connection indexes can only be used for the Net that generated them.
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NetId(pub usize);
 
 impl NetId {
@@ -41,7 +42,7 @@ impl fmt::Debug for NetId {
 
 
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeIndex(NetId, usize);
 
 impl fmt::Display for NodeIndex {
@@ -56,7 +57,7 @@ impl fmt::Debug for NodeIndex {
 }
 
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionIndex(NetId, usize);
 
 impl fmt::Display for ConnectionIndex {
@@ -73,11 +74,13 @@ impl fmt::Debug for ConnectionIndex {
 
 
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NetParams {
     pub input_count: usize,
+    #[serde(skip_serializing, skip_deserializing)]
     pub input_names: Option<&'static[&'static str]>,
     pub output_count: usize,
+    #[serde(skip_serializing, skip_deserializing)]
     pub output_names: Option<&'static[&'static str]>,
 }
 
@@ -93,7 +96,7 @@ impl NetParams {
 }
 
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MutationParams {
     pub prob_mutate_activation_function_of_node: f64,
     pub prob_mutate_weight: f64,
@@ -109,7 +112,7 @@ pub struct MutationParams {
 
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Net<Fit> where Fit: FitnessInfo {
     pub id: NetId,
     pub net_params: NetParams,

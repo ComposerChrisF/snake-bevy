@@ -1,7 +1,8 @@
 use rand::{thread_rng, Rng};
+use serde::{Deserialize, Serialize};
 
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ActivationFunction {
     None,       // f(x) = x, i.e. Linear
     Sigmoid,    // f(x) = 1.0 / (1.0 + exp(-x));                                f(4) = 0.982013790037908

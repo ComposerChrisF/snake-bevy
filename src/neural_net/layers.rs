@@ -1,7 +1,8 @@
 use std::fmt::Display;
+use serde::{Deserialize, Serialize};
 
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Layer {
     Input,
     Hidden(u16),

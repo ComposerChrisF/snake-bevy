@@ -243,13 +243,19 @@ pub enum PlaybackEvents {
 
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct Playback {
+    pub playback_events: Vec<PlaybackEvents>,
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SnakeGame {
     pub grid: Grid,
     pub snake: Snake,
     pub apple: Apple,
     pub apples_eaten: usize,
     pub state: GameState,
-    pub playback_events: Vec<PlaybackEvents>,
+    pub playback: Playback,
     pub visited_vector: Vec<bool>,
     pub points_visited: usize,
 }
@@ -274,13 +280,13 @@ impl SnakeGame {
             apple,
             apples_eaten: 0,
             state: GameState::Running,
-            playback_events: Vec::with_capacity(256),
+            playback: Playback { playback_events: Vec::with_capacity(256) },
             visited_vector: vec![false; Grid::WIDTH as usize * Grid::HEIGHT as usize],
             points_visited: 0,
         };
-        new_grid.playback_events.clear();
-        new_grid.playback_events.push(PlaybackEvents::NewGame);
-        new_grid.playback_events.push(PlaybackEvents::NewAppleLocation(apple.location));
+        new_grid.playback.playback_events.clear();
+        new_grid.playback.playback_events.push(PlaybackEvents::NewGame);
+        new_grid.playback.playback_events.push(PlaybackEvents::NewAppleLocation(apple.location));
         new_grid
     }
 
@@ -295,9 +301,9 @@ impl SnakeGame {
         apple_cell.kind = CellKind::Apple;
         self.apples_eaten = 0;
         self.state = GameState::Running;
-        self.playback_events.clear();
-        self.playback_events.push(PlaybackEvents::NewGame);
-        self.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
+        self.playback.playback_events.clear();
+        self.playback.playback_events.push(PlaybackEvents::NewGame);
+        self.playback.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
         self.clear_visited();
         self.points_visited = 0;
     }
@@ -325,7 +331,7 @@ impl SnakeGame {
     pub fn move_snake(&mut self, direction: Direction, new_apple_location: Option<GridPoint>) {
         //info!("move_snake({direction:#?}, {new_apple_location:#?}); snake.to_grow={}; GameState={:?}", self.snake.to_grow, self.state);
         if self.state != GameState::Running { return; }
-        self.playback_events.push(PlaybackEvents::MoveSnake(direction));
+        self.playback.playback_events.push(PlaybackEvents::MoveSnake(direction));
 
         // Move tail first, if needed
         if self.snake.to_grow == 0 {
@@ -352,11 +358,11 @@ impl SnakeGame {
                 };
                 let new_apple_cell = self.grid.get_cell_mut(self.apple.location);
                 new_apple_cell.kind = CellKind::Apple;
-                self.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
+                self.playback.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
                 self.snake.to_grow += Self::GROW_INCREMENT;
             }
             _ => {
-                self.playback_events.push(PlaybackEvents::GameOver);
+                self.playback.playback_events.push(PlaybackEvents::GameOver);
                 self.state = GameState::GameOver;
                 new_cell.kind = CellKind::Crash;
             }

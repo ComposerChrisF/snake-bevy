@@ -1,11 +1,13 @@
 use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
 
+use serde::{Deserialize, Serialize};
+
 use super::nets::{ConnectionIndex, NodeIndex};
 
 
 static CONNECTION_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionId(usize);
 
 impl ConnectionId {
@@ -26,7 +28,7 @@ impl fmt::Debug for ConnectionId {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Connection {
     pub index: ConnectionIndex,
     pub id: ConnectionId,

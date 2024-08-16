@@ -1,11 +1,12 @@
 use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
 use super::{activation_functions::ActivationFunction, layers::Layer, nets::{ConnectionIndex, NodeIndex}};
+use serde::{Serialize, Deserialize};
 
 
 
 static NODE_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(usize);
 
 impl NodeId {
@@ -26,7 +27,7 @@ impl fmt::Debug for NodeId {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Node {
     pub index: NodeIndex,
     pub id: NodeId,

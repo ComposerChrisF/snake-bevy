@@ -2,23 +2,25 @@ use core::fmt;
 use std::fs::File;
 use std::io::Write;
 
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
 use crate::neural_net::nets::{Net, NetParams};
 use crate::neural_net::populations::{FitnessInfo, PopulationParams};
-use crate::snake_game::{self, Direction, GameState, SnakeGame};
+use crate::snake_game::{Direction, GameState, SnakeGame};
 use crate::neural_net::{populations::Population, nets::MutationParams};
 
 // TODO list:
-// - Support load/save of Nets
+// x Support save of Nets
+// - Support load of Nets
 // - Create separate Net viewer
-// - Support load/save of game playback
+// x Support save of game playback
+// - Support load of game playback
 // - Create separate Playback viewer
 // - Combine net viewer with playback viewer (animate net during playback!)
 // - Prune Layer::Unreachable nodes!
 // - Mark nodes not (eventually) reaching back to Inputs as Layer::Unreachable
 // - OR: Figure out how to correctly assign Hidden(#) to current Unreachables!
-// - Write out Nets (and Playback) when "New Max" above 550 encountered (pass in command line?)
 // - Refactor NeuralNet and SnakeGame into crates separate from snake_bevy
 // - Add originating NetId into ConnectionId (and NodeId)?  So we can trace geneology?
 // - Mark Nets with a GUID for easy long-term identification
@@ -34,10 +36,7 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //              - only max
 //              - only ave
 //              - only min
-//          x Change weighing of apples vs. uniqely visited squares vs. movement
-//              - e.g. for a while (100 generations?) make visiting unique sqares most important, then apples, then moves
 //          - Add severe penalty for Hidden node count or moves or moves beyond unique ones
-//          x Also, keep fitness once computed, but clear every era (i.e. when fitness function changes)
 //          - Vary mutations rate: multiplier of 1.0, 2.0, 5.0, 0.2 for a while (100 generations?)
 //          - Vary population size
 //      - CONSIDER: Instead of varying fitness function, per se, how about periodic cataclisms or
@@ -51,7 +50,7 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //          - Bouns: Resurection of stashed best Nets, but with all of their weights tweaked.
 // - Add multi-threading for running generations
 // - Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
-// - Look at command line to determine to run the game or to run simulation; at least until refactored into multiple crates and apps!
+// x Look at command line to determine to run the game or to run simulation; at least until refactored into multiple crates and apps!
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct MyFitnessInfo {
@@ -447,18 +446,30 @@ impl NnPlaysSnake {
         
         match era_info.eras {
             4 => self.event_cataclism_remove_fewest_visited(),
+            5 => self.event_cataclism_remove_fewest_apples(),
+            8 => self.event_resurrect_maxes(),
             _ => {},
         }
     }
 
     fn event_cataclism_remove_fewest_visited(&mut self) {
-        for _n in self.population.nets.iter() {
-            
-        }
+        println!("XXXXXX CATACLISM: Remove fewest visited XXXXXXXXXXXXXXXXXXXXXXXX");
+        let visited_max = self.population.nets.iter().map(|n| n.fitness_info.visited).reduce(|acc, v| if acc < v { v } else { acc }).unwrap();
+        let visited_ave = self.population.nets.iter().map(|n| n.fitness_info.visited).sum::<f32>() / self.population.nets.len() as f32;
+        let visited_benchmark = if thread_rng().gen_bool(0.5) { visited_max / 2.0 } else { visited_ave };
+        self.population.nets.retain(|n| n.fitness_info.visited > visited_benchmark );
     }
     
+    fn event_cataclism_remove_fewest_apples(&mut self) {
+        println!("XXXXXX CATACLISM: Remove fewest apples XXXXXXXXXXXXXXXXXXXXXXXX");
+        let apples_max = self.population.nets.iter().map(|n| n.fitness_info.apples).reduce(|acc, v| if acc < v { v } else { acc }).unwrap();
+        let apples_ave = self.population.nets.iter().map(|n| n.fitness_info.apples).sum::<f32>() / self.population.nets.len() as f32;
+        let apples_benchmark = if thread_rng().gen_bool(0.5) { apples_max / 2.0 } else { apples_ave };
+        self.population.nets.retain(|n| n.fitness_info.apples > apples_benchmark );
+    }
+
     fn event_resurrect_maxes(&mut self) {
-        println!("@@@@ RESURECTION!!! @@@@");
+        println!("@@@@ RESURECTION!!! @@@@@@@@@@@@@@@@@");
         for sn in self.stashed_nets.iter() {
             self.population.nets.push(sn.net.clone());
         }

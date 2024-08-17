@@ -1,6 +1,8 @@
 // Disable console on Windows for non-dev builds.
 #![cfg_attr(not(feature = "dev"), windows_subsystem = "windows")]
 
+use std::fs;
+
 use bevy::prelude::*;
 use clap::Parser;
 use snake_bevy::nn_plays_snake::NnPlaysSnake;
@@ -14,6 +16,14 @@ fn main() -> AppExit {
         nn_player.run_x_generations();
         AppExit::Success
     } else {
-        App::new().add_plugins(AppPlugin).run()
+        if let Some(path) = &args.playback {
+            if !fs::exists(path).unwrap() {
+                panic!("--playback <file>: file not found: {path:?}")
+            }
+        }
+        App::new()
+            .insert_resource(args)
+            .add_plugins(AppPlugin)
+            .run()
     }
 }

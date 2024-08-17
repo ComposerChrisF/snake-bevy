@@ -4,6 +4,7 @@
 //! consider using a [fixed timestep](https://github.com/bevyengine/bevy/blob/main/examples/movement/physics_in_fixed_timestep.rs).
 
 use std::collections::VecDeque;
+use std::fs;
 
 use bevy::prelude::*;
 use bevy_ecs_tilemap::map::TilemapId;
@@ -19,9 +20,12 @@ use bevy_ecs_tilemap::tiles::TileTextureIndex;
 use bevy_ecs_tilemap::TilemapBundle;
 use bevy_ecs_tilemap::TilemapPlugin;
 
+use crate::cmdline::Args;
 use crate::screen::Screen;
 use crate::snake_game;
 use crate::snake_game::GameState;
+use crate::snake_game::Playback;
+use crate::snake_game::PlaybackEvents;
 use crate::AppSet;
 
 use super::assets::HandleMap;
@@ -43,6 +47,8 @@ struct MySnakeGame {
     snake_game: snake_game::SnakeGame,
     location_apple_prev: snake_game::GridPoint,
     location_tail_prev: snake_game::GridPoint,
+    playback: Option<Playback>,
+    playback_index: usize,       // Current playback location, i.e. playback.playback_events[index]
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -60,7 +66,6 @@ pub(super) fn plugin(app: &mut App) {
     app.observe(spawn_level);
     app.observe(update_score);
 }
-
 
 
 
@@ -90,6 +95,7 @@ impl Dir {
 pub struct SnakeMovementController {
     player_movement_intent: Option<Dir>,
     is_paused: bool,
+    speed: f64,
 }
 
 fn record_movement_controller(
@@ -118,11 +124,19 @@ fn record_movement_controller(
     }
 
     let mut should_toggle_pause = false;
-    if input.just_pressed(KeyCode::KeyP) || input.just_pressed(KeyCode::Pause) { should_toggle_pause = true; }
+    if input.just_pressed(KeyCode::KeyP) || input.just_pressed(KeyCode::Pause) || input.just_pressed(KeyCode::MediaPlayPause) { should_toggle_pause = true; }
+
+    const RATIO: f64 = 0.9;
+    const INV_RATIO: f64 = 1.0 / RATIO;
+    let mut speed_mult = None;
+    if input.just_pressed(KeyCode::Equal) { speed_mult = Some(RATIO); }
+    if input.just_pressed(KeyCode::Minus) { speed_mult = Some(INV_RATIO); }
+
+    // TODO: Add keys to change to prev/next playback.json!
 
     // Apply movement intent to controllers.
     let player_intends_to_move = player_movement_intent.is_some();
-    let player_provided_input = player_intends_to_move || should_toggle_pause;
+    let player_provided_input = player_intends_to_move || should_toggle_pause || speed_mult.is_some();
     if player_provided_input {
         for (mut controller, mut last_update) in &mut controller_query {
             if player_intends_to_move { 
@@ -130,6 +144,7 @@ fn record_movement_controller(
                 if should_reset_timer { *last_update = LastUpdate(0.0); }
             }
             if should_toggle_pause { controller.is_paused = !controller.is_paused; }
+            if let Some(mult) = speed_mult { controller.speed *= mult; }
         }
     }
 }
@@ -282,9 +297,19 @@ fn spawn_level(
     _trigger: Trigger<SpawnLevel>,
     mut commands: Commands,
     image_handles: Res<HandleMap<ImageKey>>,
+    args: Res<Args>,
 ) {
+    // Load Playback, if specified on commandline
+    let playback = if let Some(path_playback_file) = &args.playback {
+        // Load as a string of JSON
+        let data = fs::read_to_string(path_playback_file).unwrap();
+        // Reconstitute back into Playback object
+        let val = Some(serde_json::from_str::<Playback>(&data).unwrap());
+        val
+    } else { None };
+
     // Create the underlying snake_game--essentially our data model
-    let snake_game = snake_game::SnakeGame::new(None);
+    let snake_game = snake_game::SnakeGame::new();
 
     // Create and insert the TileMap
     let tilemap_entity = commands.spawn_empty().id();
@@ -317,9 +342,11 @@ fn spawn_level(
             snake_game,
             location_apple_prev,
             location_tail_prev,
+            playback,
+            playback_index: 0 
         },
         LastUpdate(0.0),
-        SnakeMovementController { player_movement_intent: None, is_paused: false },
+        SnakeMovementController { player_movement_intent: None, is_paused: false, speed: 0.1 },
         StateScoped(Screen::Playing),
     ));
 
@@ -375,13 +402,47 @@ fn apply_movement(
 ) {
     for (mut my_snake_game, mut last_update, movement) in snake_query.iter_mut() {
         if movement.is_paused { continue; } 
-        if let Some(dir) = movement.player_movement_intent {
+        let player_dir = movement.player_movement_intent;
+        let have_player_movement = player_dir.is_some();
+        let have_playback = my_snake_game.playback.is_some();
+        if have_player_movement || have_playback {
             let current_time = time.elapsed_seconds_f64();
-            if current_time - last_update.0 > 0.1 {
+            if current_time - last_update.0 > movement.speed {
+                let mut direction = if have_player_movement { player_dir.unwrap().to_snake_direction() } else { snake_game::Direction::North };
+                let mut new_apple_location = None;
+                if have_playback {
+                    let playback = my_snake_game.playback.as_ref().unwrap();
+                    let evt = playback.playback_events[my_snake_game.playback_index];
+                    match evt {
+                        PlaybackEvents::NewAppleLocation(pt) => new_apple_location = Some(pt),
+                        PlaybackEvents::GameOver => { return; }
+                        PlaybackEvents::MoveSnake(d) => { 
+                            let i_next = my_snake_game.playback_index + 1;
+                            if i_next < playback.playback_events.len() {
+                                let evt_next = playback.playback_events[i_next];
+                                if let PlaybackEvents::NewAppleLocation(pt) = evt_next {
+                                    new_apple_location = Some(pt);
+                                    my_snake_game.playback_index += 1; // Skip the NewAppleLocation event, since we've already handled it!
+                                }
+                            }
+                            direction = d;
+                        }
+                        PlaybackEvents::NewGame(pt_apple, pt_head, pt_tail) => { 
+                            let (mut tile_storage, tilemap_entity) = tilemap_query.get_single_mut().unwrap();
+                            update_tilemap_at_point(my_snake_game.snake_game.snake.head_location, None, &mut commands, tilemap_entity, &mut tile_storage, &mut tile_texture_query);
+                            my_snake_game.snake_game.restart(Some(pt_apple), Some(pt_head), Some(pt_tail));
+                            my_snake_game.playback_index += 1; 
+                            continue; 
+                        }
+                    }
+                    my_snake_game.playback_index += 1;
+                }
+                //println!("TICK: player={have_player_movement}, playback={have_playback}, dir={direction:?}, apple={new_apple_location:?}");
+                
                 let prev_apples_eaten = my_snake_game.snake_game.apples_eaten;
                 let prev_snake_len = my_snake_game.snake_game.snake.locations.len();
                 let prev_game_state = my_snake_game.snake_game.state;
-                my_snake_game.snake_game.move_snake(dir.to_snake_direction(), None);
+                my_snake_game.snake_game.move_snake(direction, new_apple_location);
                 let (tile_storage, tilemap_entity) = tilemap_query.get_single_mut().unwrap();
                 update_tilemap(&mut commands, &mut my_snake_game, tilemap_entity, tile_storage, &mut tile_texture_query);
                 if prev_apples_eaten != my_snake_game.snake_game.apples_eaten {

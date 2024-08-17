@@ -50,7 +50,6 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //          - Bouns: Resurection of stashed best Nets, but with all of their weights tweaked.
 // - Add multi-threading for running generations
 // - Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
-// x Look at command line to determine to run the game or to run simulation; at least until refactored into multiple crates and apps!
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct MyFitnessInfo {
@@ -221,7 +220,7 @@ impl NnPlaysSnake {
             },
         };
         Self {
-            game: SnakeGame::new(None),
+            game: SnakeGame::new(),
             my_meta: my_meta.clone(),
             population: Population::new(my_meta.meta),
             max_info: MyFitnessInfo::default(),
@@ -340,7 +339,7 @@ impl NnPlaysSnake {
     }
 
     pub fn run_one_game(net: &mut Net<MyFitnessInfo>, game: &mut SnakeGame, era_info: &EraInfo) -> MyFitnessInfo {
-        game.restart(None);
+        game.restart(None, None, None);
         let mut moves = 0_usize;
         while game.state == GameState::Running {
             Self::collect_and_apply_inputs(net, game);
@@ -375,20 +374,21 @@ impl NnPlaysSnake {
         match era_info.fitness_kind {
             EraFitness::Normal => {
                 // The "normal" fitness function
+                let okay_for_1st_apple = if apples == 0.0 { -1.0 } else { 1.0 };
                 10_000.0 * apples
-                +    1.0 * visited
-                -    0.1 * (excess_moves / (apples + 1.0))
+                -    1.0 * visited * okay_for_1st_apple
+                -   10.0 * (excess_moves / (apples + 1.0))
             }
             EraFitness::FavorVisits => {
                 // Favor visiting new spaces
-                1_000.0 * apples
+                10_000.0 * apples
                 +  40.0 * visited
-                -   1.0 * excess_moves
+                -  40.0 * excess_moves
             }
             EraFitness::FavorMoves => {
                 // Favor moves
-                1_000.0 * apples
-                +  30.0 * moves
+                10_000.0 * apples
+                +   30.0 * moves
             }
         }
     }

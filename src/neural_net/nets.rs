@@ -117,11 +117,15 @@ pub struct Net<Fit> where Fit: FitnessInfo {
     pub id: NetId,
     pub net_params: NetParams,
     nodes: Vec<Node>,
+    #[serde(skip_serializing, skip_deserializing)]
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
     connections: Vec<Connection>,
+    #[serde(skip_serializing, skip_deserializing)]
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
     pub fitness_info: Fit,
+    #[serde(skip_serializing, skip_deserializing)]
     pub is_evaluation_order_up_to_date: bool,
+    #[serde(skip_serializing, skip_deserializing)]
     node_order_list: Vec<NodeIndex>,
 }
 
@@ -650,6 +654,22 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             if prev == Layer::Output && n.layer != Layer::Output { println!(); }
             prev = n.layer;
         }
+    }
+    
+    pub(crate) fn load_from_file<F>(path_neuralnet_file: &std::path::PathBuf) -> Option<Net<F>> where F: FitnessInfo + for<'a> Deserialize<'a> {
+        // Load as a string of JSON
+        let data = std::fs::read_to_string(path_neuralnet_file).unwrap();
+        // Reconstitute back into Playback object
+        let mut net = serde_json::from_str::<Net<F>>(&data).unwrap();
+        
+        // Fill-in non-saved fields: map_node_id_to_index, map_connection_id_to_index, node_order_list, and is_evaluation_order_up_to_date
+        for n in net.nodes.iter()       { net.map_node_id_to_index      .insert(n.id, n.index); }
+        for c in net.connections.iter() { net.map_connection_id_to_index.insert(c.id, c.index); }
+        net.verify_invariants();
+        net.build_evaluation_order();   // computes: node_order_list, and sets is_evaluation_order_up_to_date = true
+        net.verify_invariants();
+
+        Some(net)
     }
 }
 

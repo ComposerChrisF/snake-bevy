@@ -10,5 +10,8 @@ pub struct Args {
 
     #[arg(long)]
     pub playback: Option<PathBuf>,
+
+    #[arg(long)]
+    pub net: Option<PathBuf>,
 }
 

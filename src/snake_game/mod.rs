@@ -1,6 +1,6 @@
 // TODO: Move into separate crate!
 
-use std::{collections::VecDeque, ops};
+use std::{collections::VecDeque, fs, ops};
 use rand::Rng;
 use serde::{Serialize, Deserialize};
 
@@ -252,9 +252,17 @@ pub enum PlaybackEvents {
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Playback {
     pub playback_events: Vec<PlaybackEvents>,
+}
+impl Playback {
+    pub(crate) fn load_from_file(path_playback_file: &std::path::PathBuf) -> Option<Playback> {
+        // Load as a string of JSON
+        let data = fs::read_to_string(path_playback_file).unwrap();
+        // Reconstitute back into Playback object
+        Some(serde_json::from_str::<Playback>(&data).unwrap())
+    }
 }
 
 
@@ -273,6 +281,7 @@ pub struct SnakeGame {
 impl SnakeGame {
     pub const GROW_INCREMENT: usize = 5;
 
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let mut grid = Grid::new();
         let snake = Snake::new(&mut grid);
@@ -343,19 +352,22 @@ impl SnakeGame {
         if self.state != GameState::Running { return; }
         self.playback.playback_events.push(PlaybackEvents::MoveSnake(direction));
 
-        // Move tail first, if needed
+        let offset = direction.to_point();
+        let new_head_location = self.snake.head_location.add(offset);
+        // Move tail first, if needed (this is so we can follow our own tail in a tight circle).
         if self.snake.to_grow == 0 {
-            // Snake keeps same size, so we must pop off the tail to keep the same length, we will shortly push on a new head.
+            // Snake keeps same size, so we must pop off the tail to keep the same length, we will
+            // shortly push on a new head.
             let old_tail_location = self.snake.locations.pop_back().unwrap();
             let old_tail_cell = self.grid.get_cell_mut(old_tail_location);
-            old_tail_cell.kind = CellKind::Empty;
+            // Moving tail first creates a problem for a length=2 snake where it would be valid 
+            // to reverse diretion, so we detect and disallow that here
+            old_tail_cell.kind = if new_head_location == old_tail_location && self.snake.length() <= 2 { CellKind::Crash } else { CellKind::Empty };
         } else {
             self.snake.to_grow -= 1;
         };
 
-        let offset = direction.to_point();
-        let new_location = self.snake.head_location.add(offset);
-        let new_cell = self.grid.get_cell_mut(new_location);
+        let new_cell = self.grid.get_cell_mut(new_head_location);
         let kind_hit = new_cell.kind;
         new_cell.kind = CellKind::Snake;
         match kind_hit {
@@ -379,11 +391,11 @@ impl SnakeGame {
         };
 
         // Push on new Head
-        self.snake.locations.push_front(new_location);
-        self.snake.head_location = new_location;
+        self.snake.locations.push_front(new_head_location);
+        self.snake.head_location = new_head_location;
 
         // Update visited info
-        let i = new_location.y as usize * Grid::WIDTH as usize + new_location.x as usize;
+        let i = new_head_location.y as usize * Grid::WIDTH as usize + new_head_location.x as usize;
         if !self.visited_vector[i] { self.points_visited += 1; }
         self.visited_vector[i] = true;
     }

@@ -21,6 +21,11 @@ fn main() -> AppExit {
                 panic!("--playback <file>: file not found: {path:?}")
             }
         }
+        if let Some(path) = &args.net {
+            if !fs::exists(path).unwrap() {
+                panic!("--net <file>: file not found: {path:?}")
+            }
+        }
         App::new()
             .insert_resource(args)
             .add_plugins(AppPlugin)

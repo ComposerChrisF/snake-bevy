@@ -4,7 +4,6 @@
 //! consider using a [fixed timestep](https://github.com/bevyengine/bevy/blob/main/examples/movement/physics_in_fixed_timestep.rs).
 
 use std::collections::VecDeque;
-use std::fs;
 
 use bevy::prelude::*;
 use bevy_ecs_tilemap::map::TilemapId;
@@ -21,6 +20,9 @@ use bevy_ecs_tilemap::TilemapBundle;
 use bevy_ecs_tilemap::TilemapPlugin;
 
 use crate::cmdline::Args;
+use crate::neural_net::nets::Net;
+use crate::nn_plays_snake::MyFitnessInfo;
+use crate::nn_plays_snake::NnPlaysSnake;
 use crate::screen::Screen;
 use crate::snake_game;
 use crate::snake_game::GameState;
@@ -48,8 +50,17 @@ struct MySnakeGame {
     location_apple_prev: snake_game::GridPoint,
     location_tail_prev: snake_game::GridPoint,
     playback: Option<Playback>,
-    playback_index: usize,       // Current playback location, i.e. playback.playback_events[index]
+    playback_index: usize,      // Current playback location, i.e. playback.playback_events[index]
+    net: Net<MyFitnessInfo>,    // NeuralNet to play game "live".  Avoid Option<Net<MyFitnessInfO>> as this causes mutable borrow problems in code.
+    is_net_valid: bool,
 }
+
+impl MySnakeGame {
+    pub fn mut_borrow_game_and_net(&mut self, f: impl Fn(&mut snake_game::SnakeGame, &mut Net<MyFitnessInfo>)) {
+        f(&mut self.snake_game, &mut self.net);
+    }
+}
+
 
 pub(super) fn plugin(app: &mut App) {
     // Register (i.e. record) what movement the player takes via keyboard/etc.
@@ -301,11 +312,10 @@ fn spawn_level(
 ) {
     // Load Playback, if specified on commandline
     let playback = if let Some(path_playback_file) = &args.playback {
-        // Load as a string of JSON
-        let data = fs::read_to_string(path_playback_file).unwrap();
-        // Reconstitute back into Playback object
-        let val = Some(serde_json::from_str::<Playback>(&data).unwrap());
-        val
+        Playback::load_from_file(path_playback_file)
+    } else { None };
+    let net = if let Some(path_neuralnet_file) = &args.net {
+        Net::<MyFitnessInfo>::load_from_file::<MyFitnessInfo>(path_neuralnet_file)
     } else { None };
 
     // Create the underlying snake_game--essentially our data model
@@ -337,13 +347,17 @@ fn spawn_level(
     // Init and insert the MySnakeGame
     let location_apple_prev = snake_game.apple.location;
     let location_tail_prev = snake_game.snake.locations[snake_game.snake.locations.len() - 1];
+    let is_net_valid = net.is_some();
+    let net = if let Some(net) = net { net } else { Net::new(NnPlaysSnake::new_params()) };
     commands.spawn((
         MySnakeGame { 
             snake_game,
             location_apple_prev,
             location_tail_prev,
             playback,
-            playback_index: 0 
+            playback_index: 0,
+            net,
+            is_net_valid,
         },
         LastUpdate(0.0),
         SnakeMovementController { player_movement_intent: None, is_paused: false, speed: 0.1 },
@@ -405,13 +419,13 @@ fn apply_movement(
         let player_dir = movement.player_movement_intent;
         let have_player_movement = player_dir.is_some();
         let have_playback = my_snake_game.playback.is_some();
-        if have_player_movement || have_playback {
+        let have_net = my_snake_game.is_net_valid;
+        if have_player_movement || have_playback || have_net {
             let current_time = time.elapsed_seconds_f64();
             if current_time - last_update.0 > movement.speed {
-                let mut direction = if have_player_movement { player_dir.unwrap().to_snake_direction() } else { snake_game::Direction::North };
+                let mut direction = if let Some(dir) = player_dir { dir.to_snake_direction() } else { snake_game::Direction::North };
                 let mut new_apple_location = None;
-                if have_playback {
-                    let playback = my_snake_game.playback.as_ref().unwrap();
+                if let Some(playback) = my_snake_game.playback.as_ref() {
                     let evt = playback.playback_events[my_snake_game.playback_index];
                     match evt {
                         PlaybackEvents::NewAppleLocation(pt) => new_apple_location = Some(pt),
@@ -436,6 +450,12 @@ fn apply_movement(
                         }
                     }
                     my_snake_game.playback_index += 1;
+                } else if have_net {
+                    my_snake_game.mut_borrow_game_and_net(|game, net|{
+                        NnPlaysSnake::collect_and_apply_inputs(net, game);
+                        net.evaluate();
+                    });
+                    direction = NnPlaysSnake::interpret_outputs(&my_snake_game.net);
                 }
                 //println!("TICK: player={have_player_movement}, playback={have_playback}, dir={direction:?}, apple={new_apple_location:?}");
                 

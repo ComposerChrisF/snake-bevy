@@ -12,12 +12,11 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 
 // TODO list:
 // x Support save of Nets
-// - Support load of Nets
-// - Create separate Net viewer
+// x Support load of Nets
+// - Create Net viewer
 // x Support save of game playback
-// - Support load of game playback
-// - Create separate Playback viewer
-// - Combine net viewer with playback viewer (animate net during playback!)
+// x Support load of game playback
+// x Create Playback viewer
 // - Prune Layer::Unreachable nodes!
 // - Mark nodes not (eventually) reaching back to Inputs as Layer::Unreachable
 // - OR: Figure out how to correctly assign Hidden(#) to current Unreachables!
@@ -193,19 +192,23 @@ pub const ERA_SIZE: usize = 200;
 pub const ERA_FIRST_PORTION_SIZE: usize = 100;
 
 impl NnPlaysSnake {
+    pub fn new_params() -> NetParams {
+        NetParams {
+            input_count: NUM_INPUTS,
+            input_names: Some(&INPUT_NAMES),
+            output_count: NUM_OUTPUTS,
+            output_names: Some(&OUTPUT_NAMES),
+        }
+    }
+
     pub fn new() -> Self {
         let my_meta = MyMetaParams {
             max_generations: 100_000,
-            games_per_net: 2,
-            generations_between_events: 25,
+            games_per_net: 10,
+            generations_between_events: 100,
             meta: PopulationParams {
                 population_size: 10_000,
-                net_params: NetParams {
-                    input_count: NUM_INPUTS,
-                    input_names: Some(&INPUT_NAMES),
-                    output_count: NUM_OUTPUTS,
-                    output_names: Some(&OUTPUT_NAMES),
-                },
+                net_params: Self::new_params(),
                 mutation_params: MutationParams {
                     prob_add_connection: 0.05,
                     prob_add_node: 0.03,
@@ -258,7 +261,7 @@ impl NnPlaysSnake {
             if era_info.eras > 0 {
                 if era_info.is_era_boundary {
                     println!("***** NEW ERA ****************************************** {:?}:{}", era_info.fitness_kind, era_info.eras);
-                    self.pick_and_apply_event(&era_info);
+                    self.pick_and_apply_era_event(&era_info);
                 } else if era_info.is_end_special_fitness {
                     println!("----- End Special Fitness ----- {:?}:{}", era_info.fitness_kind, era_info.eras);
                 }
@@ -290,16 +293,18 @@ impl NnPlaysSnake {
                 }
             }
             let mut max_single_game_fitness_info = MyFitnessInfo::default();
+            let mut max_playback = game.playback.clone();
             let mut sum_fitnesses_info = MyFitnessInfo { fitness: 0.0, ..Default::default() };
             for _ in 0..games_played_for_fitness {
                 let single_game_fitness_info = Self::run_one_game(net, game, era_info);
                 if max_single_game_fitness_info.fitness < single_game_fitness_info.fitness { 
-                    max_single_game_fitness_info = single_game_fitness_info; 
+                    max_single_game_fitness_info = single_game_fitness_info;
+                    max_playback = game.playback.clone();
                 }
                 sum_fitnesses_info += &single_game_fitness_info;
             }
             let ave_fitness_info = sum_fitnesses_info * (1.0 / games_played_for_fitness as f32);
-            let final_net_fitness_info = max_single_game_fitness_info * 0.75 + ave_fitness_info * 0.25;
+            let final_net_fitness_info = max_single_game_fitness_info * 0.25 + ave_fitness_info * 0.75;
             net.fitness_info = final_net_fitness_info;
             if generation != 0 && global_max_fitness_info.fitness < final_net_fitness_info.fitness {
                 println!("New Max  gen={generation}: {}: fitness={final_net_fitness_info}; max={max_single_game_fitness_info}    multiplier={multiplier}", net.id);
@@ -315,19 +320,19 @@ impl NnPlaysSnake {
                         let apples = final_net_fitness_info.apples;
                         let fitness = final_net_fitness_info.fitness;
                         let date = chrono::Local::now().format("%Y%m%d");
-                        let filename = format!("stash/Net-{date}-Gen{gen}-Apples{apples}-Fit{fitness:.0}.json");
+                        let filename = format!("stash/Net-{date}-Fit{fitness:.0}-Apples{apples}-Gen{gen}.json");
                         let mut file = File::create(filename).unwrap();
                         file.write_all(s.as_bytes()).unwrap();
                     }
                 }
-                match serde_json::to_string_pretty(&game.playback) {
+                match serde_json::to_string_pretty(&max_playback) {
                     Err(e) => { println!("ERROR serializing Playback to JSON: {e:#?}"); panic!() }
                     Ok(s) => {
                         let gen = generation;
                         let apples = final_net_fitness_info.apples;
                         let fitness = final_net_fitness_info.fitness;
                         let date = chrono::Local::now().format("%Y%m%d");
-                        let filename = format!("stash/Net-{date}-Gen{gen}-Apples{apples}-Fit{fitness:.0}-Playback.json");
+                        let filename = format!("stash/Net-{date}-Fit{fitness:.0}-Apples{apples}-Gen{gen}-Playback.json");
                         let mut file = File::create(filename).unwrap();
                         file.write_all(s.as_bytes()).unwrap();
                     }
@@ -393,7 +398,7 @@ impl NnPlaysSnake {
         }
     }
     
-    fn interpret_outputs(net: &Net<MyFitnessInfo>) -> Direction {
+    pub fn interpret_outputs(net: &Net<MyFitnessInfo>) -> Direction {
         let outputs = net.get_outputs();
         let mut i_max = 0;
         let mut v_max = f32::MIN;
@@ -412,8 +417,9 @@ impl NnPlaysSnake {
         }
     }
 
-    fn collect_and_apply_inputs(net: &mut Net<MyFitnessInfo>, game: &SnakeGame) {
+    pub fn collect_and_apply_inputs(net: &mut Net<MyFitnessInfo>, game: &SnakeGame) {
         let (wall_dist, snake_dist) = game.wall_and_body_distances();
+        //println!("wall_dist={wall_dist:?}; snake_dist={snake_dist:?}");
         let pt_snake_head = game.snake.head_location;
         let pt_apple = game.apple.location;
         let snake_length = game.snake.length();
@@ -438,7 +444,7 @@ impl NnPlaysSnake {
     
 
     // EVENTS
-    fn pick_and_apply_event(&mut self, era_info: &EraInfo) {
+    fn pick_and_apply_era_event(&mut self, era_info: &EraInfo) {
         if era_info.eras > 0 && era_info.is_era_boundary && era_info.fitness_kind == EraFitness::Normal {
             self.event_resurrect_maxes();
         }

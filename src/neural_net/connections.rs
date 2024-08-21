@@ -11,9 +11,8 @@ static CONNECTION_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 pub struct ConnectionId(usize);
 
 impl ConnectionId {
-    pub fn new_unique() -> ConnectionId {
-        ConnectionId(CONNECTION_ID_NEXT.fetch_add(1, Ordering::SeqCst))
-    }
+    pub fn new_unique() -> ConnectionId { ConnectionId(CONNECTION_ID_NEXT.fetch_add(1, Ordering::SeqCst)) }
+    pub fn get_ordinal(&self) -> usize { self.0 }
 }
 
 impl fmt::Display for ConnectionId {

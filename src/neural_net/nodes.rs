@@ -10,9 +10,8 @@ static NODE_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 pub struct NodeId(usize);
 
 impl NodeId {
-    pub fn new_unique() -> NodeId {
-        NodeId(NODE_ID_NEXT.fetch_add(1, Ordering::SeqCst))
-    }
+    pub fn new_unique() -> NodeId { NodeId(NODE_ID_NEXT.fetch_add(1, Ordering::SeqCst)) }
+    pub fn get_ordinal(&self) -> usize { self.0 }
 }
 
 impl fmt::Display for NodeId {

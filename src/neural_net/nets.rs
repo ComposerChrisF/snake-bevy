@@ -5,7 +5,7 @@ use log::{debug, trace};
 use rand::{thread_rng, Rng, prelude::SliceRandom};
 use serde::{Deserialize, Serialize};
 
-use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::FitnessInfo};
+use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::FitnessInfo, species::SpeciesIndex};
 
 fn is_none_or<T, U>(val: Option<T>, f: U) -> bool 
     where T: Sized, U: FnOnce(T) -> bool {
@@ -119,7 +119,7 @@ pub struct Net<Fit> where Fit: FitnessInfo {
     nodes: Vec<Node>,
     #[serde(skip_serializing, skip_deserializing)]
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
-    connections: Vec<Connection>,
+    pub(crate) connections: Vec<Connection>,
     #[serde(skip_serializing, skip_deserializing)]
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
     pub fitness_info: Fit,
@@ -127,6 +127,8 @@ pub struct Net<Fit> where Fit: FitnessInfo {
     pub is_evaluation_order_up_to_date: bool,
     #[serde(skip_serializing, skip_deserializing)]
     node_order_list: Vec<NodeIndex>,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub species_index: Option<SpeciesIndex>,
 }
 
 impl <Fit> Net<Fit> where Fit: FitnessInfo {
@@ -194,6 +196,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             fitness_info: Fit::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::with_capacity(capacity),
+            species_index: None,
         };
 
         // NOTE: We add them specifically in this order, so that we can
@@ -203,7 +206,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             net.add_node(None, ActivationFunction::None, Some(Layer::Input), 0.0);
         }
         for _ in 0..net.net_params.output_count {
-            net.add_node(None, ActivationFunction::Sigmoid, Some(Layer::Output), 0.0);
+            net.add_node(None, ActivationFunction::ModSigmoid, Some(Layer::Output), 0.0);
         }
         net
     }
@@ -344,6 +347,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             fitness_info: Fit::default(),
             is_evaluation_order_up_to_date: false,
             node_order_list: Vec::new(),
+            species_index: None,
         };
 
 
@@ -540,6 +544,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         }
 
         // Add a connection
+        // TODO: Track node connections and re-use connection id if connection is same! (pg 108, section 3.2 para #3)
         if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_add_connection, mutation_multiplier)) && input_and_hidden.len() > 1 {
             let mut index_from = Self::choose_index(&input_and_hidden);
             let mut index_to   = Self::choose_index_not(&hidden_and_output, index_from);
@@ -589,15 +594,15 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             let connection_index_old = Self::choose_index(&connection_index_list);
             let connection_old = self.get_connection_mut(connection_index_old);
             connection_old.is_enabled = false;
-            let weight_connection_new_a = connection_old.weight;
+            let weight_connection_new_b = connection_old.weight;
             let node_index_input  = connection_old. input_node;
             let node_index_output = connection_old.output_node;
             let node_output = self.get_node(node_index_output);
             let activation_function = node_output.activation_function;
 
             let node_index_new = self.add_node(None, activation_function, None, 0.0);
-            let connection_index_new_a = self.add_connection(None, weight_connection_new_a, true, /*from*/ node_index_input, /*to*/ node_index_new);
-            let connection_index_new_b = self.add_connection(None, activation_function.get_neutral_value(), true, /*from*/ node_index_new, /*to*/ node_index_output);
+            let connection_index_new_a = self.add_connection(None, activation_function.get_neutral_value(), true, /*from*/ node_index_input, /*to*/ node_index_new   );
+            let connection_index_new_b = self.add_connection(None, weight_connection_new_b,                 true, /*from*/ node_index_new,   /*to*/ node_index_output);
             trace!("Mutating by adding node {} and connections {} and {}", node_index_new, connection_index_new_a, connection_index_new_b);
         }
 
@@ -671,6 +676,42 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
 
         Some(net)
     }
+    
+    pub(crate) fn count_excess_disjoint(&self, net2: &Net<Fit>) -> (usize, usize) {
+        let id_max = self.nodes.iter().map(|n| n.id.get_ordinal()).max().unwrap();
+        let (excess_nodes, disjoint_nodes) = net2.nodes.iter()
+            .filter(|&n| !self.map_node_id_to_index.contains_key(&n.id))
+            .fold((0,0), |acc, n| if n.id.get_ordinal() > id_max { 
+                    // Excess gene
+                    (acc.0 + 1, acc.1    ) 
+                } else { 
+                    //          Disjoint gene
+                    (acc.0    , acc.1 + 1)
+                }
+            );
+        let id_max = self.connections.iter().map(|c| c.id.get_ordinal()).max().unwrap_or(0);
+        let (excess_cons, disjoint_cons) = net2.connections.iter()
+            .filter(|&c| !self.map_connection_id_to_index.contains_key(&c.id))
+            .fold((0,0), |acc, c| if c.id.get_ordinal() > id_max { 
+                    // Excess gene
+                    (acc.0 + 1, acc.1    ) 
+                } else { 
+                    //          Disjoint gene
+                    (acc.0    , acc.1 + 1)
+                }
+            );
+        (excess_nodes + excess_cons, disjoint_nodes + disjoint_cons)
+    }
+    
+    pub(crate) fn sum_weights_distance_for_common_connections(&self, net2: &Net<Fit>) -> f32 {
+        net2.connections.iter()
+            .filter_map(|c2| 
+                if let Some(&c1_index) = self.map_connection_id_to_index.get(&c2.id) {
+                    let c1 = self.get_connection(c1_index);
+                    Some(c2.weight - c1.weight)
+                } else { None })
+            .fold(0.0, |acc, w| acc + w.abs())
+    }
 }
 
 
@@ -681,6 +722,14 @@ mod tests {
     use log::info;
 
     use super::*;
+
+
+    impl FitnessInfo for f32 {
+        fn get_fitness(&self) -> f32 { *self }
+        fn set_fitness(&mut self, new: f32) { *self = new; }
+        fn get_species_weighted_fitness(&self) -> f32 { *self }
+        fn set_species_weighted_fitness(&mut self, new: f32) { *self = new; }
+    }
 
     #[test]
     fn verify_invariants_on_empty() {

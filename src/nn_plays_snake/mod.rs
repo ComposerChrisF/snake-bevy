@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::neural_net::nets::{Net, NetParams};
 use crate::neural_net::populations::{FitnessInfo, PopulationParams};
+use crate::neural_net::species::SpeciesMetaParams;
 use crate::snake_game::{Direction, GameState, SnakeGame};
 use crate::neural_net::{populations::Population, nets::MutationParams};
 
@@ -23,32 +24,18 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 // - Refactor NeuralNet and SnakeGame into crates separate from snake_bevy
 // - Add originating NetId into ConnectionId (and NodeId)?  So we can trace geneology?
 // - Mark Nets with a GUID for easy long-term identification
-// - When population stagnates (e.g. 100 generations without new highest fitness):
-//      x Always stash newest best fitness]
-//      x Increase mutations
-//      - If population has already been rebooted x times, then seed next generation from the 
-//          stash instead of usual best from prev generation; reset reboot counter
-//      - Stash top 5% or so, and reboot population
-//      !!! CONSIDER: Using NEAT approach to retaining genetically distinct Nets in population?
-//      - CONSIDER: Using different fitness functions to create diversity, e.g.:
-//          - Instead of 75% max + 25% ave, use
-//              - only max
-//              - only ave
-//              - only min
-//          - Add severe penalty for Hidden node count or moves or moves beyond unique ones
-//          - Vary mutations rate: multiplier of 1.0, 2.0, 5.0, 0.2 for a while (100 generations?)
-//          - Vary population size
-//      - CONSIDER: Instead of varying fitness function, per se, how about periodic cataclisms or
-//          bonuses that affect the whole population, e.g.:
-//          - Cataclism: Nets with fewest visited are removed from population
-//          - Cataclism: Nets with most/fewest nodes are removed from population
-//          - Cataclism: Lowest 50% of population based on new (temporary, only for this cataclism) fitness rule
-//          - Cataclism: Keep only nets with most apples
-//          - Bonus: Explode (2x, 4x?) the population for one round by randomly mating pairs
-//          - Bouns: Resurection of stashed best Nets, but with their fitness re-evaluated.
-//          - Bouns: Resurection of stashed best Nets, but with all of their weights tweaked.
+// + Research and implement NEAT techniques for speciation/diversity, rather than my ad hoc stuff.
 // - Add multi-threading for running generations
-// - Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
+// x Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
+// - Add "low-level reactions" to snake.  I.e. if a crash would happen based on snake's output, severely penalize
+//      it's fitness score, but override the reaction and choose a valid direction (perhaps highest ranked valid
+//      direction?)
+//      - Alternate: consider NSEW input that turn to 1.0 when that direction would imminently cause death.
+//      - Perhaps there are other "hard-coded AI" logic ideas worth pursuing.  (e.g. "choice enters closed off area,
+//          so penalize score." or it's alternate: NSEW inputs that turn 1.0 if that directions closes off an area.)
+// - Consider changing inputs to NSEW distance to obstacle, but also with "lifetime" of obstacle (e.g. walls are 
+//      forever), but snake body depends on how close to tail it is?
+
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct MyFitnessInfo {
@@ -56,6 +43,9 @@ pub struct MyFitnessInfo {
     apples:  f32,
     visited: f32,
     moves:   f32,
+
+    #[serde(skip_serializing, skip_deserializing)]
+    fitness_weighted_by_species: f32,
     //net_id: Option<NetId>,
 }
 
@@ -66,6 +56,7 @@ impl Default for MyFitnessInfo {
             apples:  0.0,
             visited: 0.0,
             moves:   0.0,
+            fitness_weighted_by_species: f32::MIN,
             //net_id: None,
         }
     }
@@ -73,7 +64,10 @@ impl Default for MyFitnessInfo {
 
 impl FitnessInfo for MyFitnessInfo {
     fn get_fitness(&self) -> f32 { self.fitness }
-    fn set_fitness(&mut self, new: f32) { self.fitness = new; }
+    fn set_fitness(&mut self, new: f32) { self.fitness = new; self.fitness_weighted_by_species = new; }
+    
+    fn get_species_weighted_fitness(&self) -> f32 { self.fitness_weighted_by_species }
+    fn set_species_weighted_fitness(&mut self, new: f32) { self.fitness_weighted_by_species = new }
 }
 
 impl fmt::Display for MyFitnessInfo {
@@ -96,6 +90,7 @@ impl std::ops::Mul<f32> for MyFitnessInfo {
             visited: rhs * self.visited,
             apples:  rhs * self.apples,
             moves:   rhs * self.moves,
+            fitness_weighted_by_species: rhs * self.fitness_weighted_by_species,
         }
     }
 }
@@ -109,6 +104,7 @@ impl std::ops::Add for MyFitnessInfo {
             visited: self.visited + rhs.visited,
             apples:  self.apples  + rhs.apples,
             moves:   self.moves   + rhs.moves,
+            fitness_weighted_by_species: self.fitness_weighted_by_species + rhs.fitness_weighted_by_species,
         }
     }
 }
@@ -119,6 +115,7 @@ impl std::ops::AddAssign<&Self> for MyFitnessInfo {
         self.visited += rhs.visited;
         self.apples  += rhs.apples;
         self.moves   += rhs.moves;
+        self.fitness_weighted_by_species += rhs.fitness_weighted_by_species;
     }
 }
 
@@ -207,12 +204,12 @@ impl NnPlaysSnake {
             games_per_net: 10,
             generations_between_events: 100,
             meta: PopulationParams {
-                population_size: 10_000,
+                population_size: 150,   // was 1_000 or 10_000
                 net_params: Self::new_params(),
                 mutation_params: MutationParams {
                     prob_add_connection: 0.05,
                     prob_add_node: 0.03,
-                    prob_mutate_activation_function_of_node: 0.02,
+                    prob_mutate_activation_function_of_node: 0.0,   // 0.02,
                     prob_mutate_weight: 0.80,
                     prob_reset_weight_when_mutating: 0.10,
                     max_weight_change_frac: 0.10,   // +/- 10% of current value
@@ -220,6 +217,14 @@ impl NnPlaysSnake {
                     prob_remove_connection: 0.0, // 0.01,
                     prob_remove_node: 0.0, // 0.025,
                 },
+                species_param: SpeciesMetaParams { 
+                    c1_excess: 1.0, 
+                    c2_disjoint: 1.0, 
+                    c3_weights: 0.4, 
+                    threshold: 3.0, 
+                    frac_eliminated: 0.50, 
+                    gen_without_new_max: 15,
+                 },
             },
         };
         Self {
@@ -361,11 +366,13 @@ impl NnPlaysSnake {
         // gets reset every apple (so points_visited is monotonically increasing).
         let apples  = game.apples_eaten;
         let visited = game.points_visited;
+        let fitness = Self::compute_fitness(era_info, apples, visited, moves);
         MyFitnessInfo { 
-            fitness: Self::compute_fitness(era_info, apples, visited, moves),
+            fitness,
             apples:  apples  as f32,
             visited: visited as f32,
             moves:   moves   as f32,
+            fitness_weighted_by_species: fitness,
         }
     }
 
@@ -412,7 +419,7 @@ impl NnPlaysSnake {
             0 => Direction::North,
             1 => Direction::East,
             2 => Direction::South,
-            3 => Direction::East,
+            3 => Direction::West,
             _ => panic!(),
         }
     }

@@ -7,3 +7,4 @@ mod nodes;
 mod connections;
 pub mod nets;
 pub mod populations;
+pub mod species;

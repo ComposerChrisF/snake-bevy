@@ -12,21 +12,18 @@ use crate::snake_game::{Direction, GameState, SnakeGame};
 use crate::neural_net::{populations::Population, nets::MutationParams};
 
 // TODO list:
-// x Support save of Nets
-// x Support load of Nets
 // - Create Net viewer
-// x Support save of game playback
-// x Support load of game playback
-// x Create Playback viewer
-// - Prune Layer::Unreachable nodes!
-// - Mark nodes not (eventually) reaching back to Inputs as Layer::Unreachable
-// - OR: Figure out how to correctly assign Hidden(#) to current Unreachables!
+// - Allow switching between playbacks, nets, user driving the game.
+// - Allow easy selection/changing of playback and net.
+// - Assume "stash/" if path specified can't be found.
+// - Older, not relevant unless we allow removal of nodes/connections:
+//      - Prune Layer::Unreachable nodes!
+//      - Mark nodes not (eventually) reaching back to Inputs as Layer::Unreachable
+//      - OR: Figure out how to correctly assign Hidden(#) to current Unreachables!
 // - Refactor NeuralNet and SnakeGame into crates separate from snake_bevy
 // - Add originating NetId into ConnectionId (and NodeId)?  So we can trace geneology?
 // - Mark Nets with a GUID for easy long-term identification
-// + Research and implement NEAT techniques for speciation/diversity, rather than my ad hoc stuff.
 // - Add multi-threading for running generations
-// x Every 10 generations, display stats: ave(fitness, apples, visited, move), current best(fitness,etc)
 // - Add "low-level reactions" to snake.  I.e. if a crash would happen based on snake's output, severely penalize
 //      it's fitness score, but override the reaction and choose a valid direction (perhaps highest ranked valid
 //      direction?)
@@ -35,7 +32,18 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //          so penalize score." or it's alternate: NSEW inputs that turn 1.0 if that directions closes off an area.)
 // - Consider changing inputs to NSEW distance to obstacle, but also with "lifetime" of obstacle (e.g. walls are 
 //      forever), but snake body depends on how close to tail it is?
-
+// + Research and implement NEAT techniques for speciation/diversity, rather than my ad hoc stuff.
+//      - From NEAT paper:
+//      - pop = 150 (DPNV used 1000), c1_excess = 1.0, c2_disjoint = 1.0, c3_weights = 0.4 (DPNV used 3.0),
+//          threshold = 3.0 (DPNV used 4.0 because of larger c_weights), gen_w/o_max = 15
+//      - Best net from each species (if member_count > 5) copied to next generation.
+//      - 80% chance net having weights mutated (90% uniformly perturbed, 10% chance assigned a new random value)
+//      - 75% chance inherited gene was disabled if it was disabled in either parent
+//      - 25% of offspring are result of mutation without crossover.
+//      - Inter-species mating rate was 0.001.
+//      - In small populations, probability of adding new node was 0.03, and new link mutation was 0.05.
+//      - In larger populations, adding new link was 0.30
+//      - Used modified Sigmoid(x) = 1/(1+e^(4.9x)) at all nodes
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct MyFitnessInfo {
@@ -48,15 +56,16 @@ pub struct MyFitnessInfo {
     fitness_weighted_by_species: f32,
     //net_id: Option<NetId>,
 }
+pub const FITNESS_SENTINAL: f32 = -1_000_001.0;
 
 impl Default for MyFitnessInfo {
     fn default() -> Self {
         MyFitnessInfo {
-            fitness: f32::MIN,
+            fitness: FITNESS_SENTINAL,
             apples:  0.0,
             visited: 0.0,
             moves:   0.0,
-            fitness_weighted_by_species: f32::MIN,
+            fitness_weighted_by_species: FITNESS_SENTINAL,
             //net_id: None,
         }
     }
@@ -72,13 +81,13 @@ impl FitnessInfo for MyFitnessInfo {
 
 impl fmt::Display for MyFitnessInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.1} (apples:{:.1}, visited:{:.1}, moves={:.1})", self.fitness, self.apples, self.visited, self.moves)
+        write!(f, "{:.1} (apples:{:.1}, visited:{:.1}, moves={:.1}, wt={:.1})", self.fitness, self.apples, self.visited, self.moves, self.fitness_weighted_by_species)
     }
 }
 
 impl fmt::Debug for MyFitnessInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.1} (apples:{:.1}, visited:{:.1}, moves={:.1})", self.fitness, self.apples, self.visited, self.moves)
+        write!(f, "{:.1} (apples:{:.1}, visited:{:.1}, moves={:.1}, wt={:.1})", self.fitness, self.apples, self.visited, self.moves, self.fitness_weighted_by_species)
     }
 }
 impl std::ops::Mul<f32> for MyFitnessInfo {
@@ -204,7 +213,9 @@ impl NnPlaysSnake {
             games_per_net: 10,
             generations_between_events: 100,
             meta: PopulationParams {
-                population_size: 150,   // was 1_000 or 10_000
+                population_size: 1_000, // 150,   // was 1_000 or 10_000
+                min_required_members_to_forward_best: 5,
+                frac_chance_to_cross_globally: 0.001,       // 0.1% chance to mate cross-species
                 net_params: Self::new_params(),
                 mutation_params: MutationParams {
                     prob_add_connection: 0.05,
@@ -276,7 +287,14 @@ impl NnPlaysSnake {
             if count_in_stash != stash_population_last || (generation % 10) == 0 {
                 stash_population_last = count_in_stash;
                 let n = &self.population.nets[0];
-                println!("Best for gen {generation}: {}: fitness={}; {count_in_stash} ({:.1}%)", n.id, n.fitness_info, 100.0 * count_in_stash as f32 / self.stashed_nets.len() as f32);
+                let net_id = n.id;
+                let species_count = self.population.species.species_list.len();
+                let (cur, max) = self.population.species.species_list.iter().fold((0, 0), |acc, s| (acc.0 + s.stats.current_count, acc.1 + s.stats.max_count));
+                let cur = cur as f32 / species_count as f32;
+                let max = max as f32 / species_count as f32;
+                let pop = self.population.nets.len();
+                let stash_len = self.stashed_nets.len();
+                println!("Best for gen {generation}: {net_id}: fitness={}; {count_in_stash} ({:.1}%,{stash_len}) - species={species_count}({cur:.1},{max:.1})/pop={pop}", n.fitness_info, 100.0 * count_in_stash as f32 / stash_len as f32);
             }
         }
     }
@@ -286,46 +304,57 @@ impl NnPlaysSnake {
         let pop  = &mut self.population;
         let game = &mut self.game;
         let mut global_max_fitness_info = self.max_info;
-        pop.run_one_generation(multiplier, |net| {
+        pop.run_one_generation(multiplier, |net, net_count_in_same_species| {
             // If we've already computed this Net's fitness, just use that, unless...
-            if net.fitness_info.fitness != f32::MIN { 
+            if net.fitness_info.fitness != FITNESS_SENTINAL { 
                 // ...unless it's an era boundary, in which case the fitness function might
                 // change, so let's re-evaluate then.
                 if era_info.is_era_boundary {
-                    net.fitness_info.fitness = f32::MIN;
+                    net.fitness_info.fitness = FITNESS_SENTINAL;
                 } else {
+                    net.fitness_info.fitness_weighted_by_species = net.fitness_info.fitness / net_count_in_same_species;    // Update, since population changed since last time!!
                     return net.fitness_info;
                 }
             }
             let mut max_single_game_fitness_info = MyFitnessInfo::default();
+            let mut min_single_game_fitness_info = MyFitnessInfo { fitness: f32::MAX, fitness_weighted_by_species: f32::MAX, ..Default::default() };
             let mut max_playback = game.playback.clone();
-            let mut sum_fitnesses_info = MyFitnessInfo { fitness: 0.0, ..Default::default() };
+            let mut sum_fitnesses_info = MyFitnessInfo { fitness: 0.0, fitness_weighted_by_species: 0.0, ..Default::default() };
             for _ in 0..games_played_for_fitness {
-                let single_game_fitness_info = Self::run_one_game(net, game, era_info);
-                if max_single_game_fitness_info.fitness < single_game_fitness_info.fitness { 
+                let single_game_fitness_info = Self::run_one_game(net, game, era_info, net_count_in_same_species);
+                assert!(single_game_fitness_info.fitness != crate::nn_plays_snake::FITNESS_SENTINAL);
+                assert!(single_game_fitness_info.fitness_weighted_by_species != crate::nn_plays_snake::FITNESS_SENTINAL);
+                if max_single_game_fitness_info.fitness_weighted_by_species < single_game_fitness_info.fitness_weighted_by_species { 
                     max_single_game_fitness_info = single_game_fitness_info;
                     max_playback = game.playback.clone();
                 }
+                if min_single_game_fitness_info.fitness_weighted_by_species > single_game_fitness_info.fitness_weighted_by_species {
+                    min_single_game_fitness_info = single_game_fitness_info;
+                }
                 sum_fitnesses_info += &single_game_fitness_info;
             }
+            assert!(max_single_game_fitness_info.fitness != crate::nn_plays_snake::FITNESS_SENTINAL);
+            assert!(min_single_game_fitness_info.fitness != f32::MAX);
             let ave_fitness_info = sum_fitnesses_info * (1.0 / games_played_for_fitness as f32);
-            let final_net_fitness_info = max_single_game_fitness_info * 0.25 + ave_fitness_info * 0.75;
-            net.fitness_info = final_net_fitness_info;
-            if generation != 0 && global_max_fitness_info.fitness < final_net_fitness_info.fitness {
+            let mut final_net_fitness_info = max_single_game_fitness_info * 0.25 + ave_fitness_info * 0.50 + min_single_game_fitness_info * 0.25;
+            final_net_fitness_info.fitness_weighted_by_species = final_net_fitness_info.fitness / net_count_in_same_species;    // Set explicitly to avoid rounding errors in sums
+            if generation != 0 && global_max_fitness_info.fitness_weighted_by_species < final_net_fitness_info.fitness_weighted_by_species {
                 println!("New Max  gen={generation}: {}: fitness={final_net_fitness_info}; max={max_single_game_fitness_info}    multiplier={multiplier}", net.id);
                 global_max_fitness_info = final_net_fitness_info;
                 self.stashed_nets.push(StashInfo { 
                     net: net.clone(), 
                     generation,
                 });
+                // Write out current playback and net to JSON files (for further inspection and the ability to load them in later)
                 match serde_json::to_string_pretty(&net) {
                     Err(e) => { println!("ERROR serializing Net to JSON: {e:#?}"); panic!() }
                     Ok(s) => {
                         let gen = generation;
                         let apples = final_net_fitness_info.apples;
-                        let fitness = final_net_fitness_info.fitness;
+                        let apples_max = max_single_game_fitness_info.apples;
+                        let sw_fitness = final_net_fitness_info.fitness_weighted_by_species;
                         let date = chrono::Local::now().format("%Y%m%d");
-                        let filename = format!("stash/Net-{date}-Fit{fitness:.0}-Apples{apples}-Gen{gen}.json");
+                        let filename = format!("stash/Net-{date}-Fit{sw_fitness:.0}-Apples{apples:.2}({apples_max:.0})-Gen{gen}.json");
                         let mut file = File::create(filename).unwrap();
                         file.write_all(s.as_bytes()).unwrap();
                     }
@@ -335,9 +364,10 @@ impl NnPlaysSnake {
                     Ok(s) => {
                         let gen = generation;
                         let apples = final_net_fitness_info.apples;
-                        let fitness = final_net_fitness_info.fitness;
+                        let apples_max = max_single_game_fitness_info.apples;
+                        let sw_fitness = final_net_fitness_info.fitness_weighted_by_species;
                         let date = chrono::Local::now().format("%Y%m%d");
-                        let filename = format!("stash/Net-{date}-Fit{fitness:.0}-Apples{apples}-Gen{gen}-Playback.json");
+                        let filename = format!("stash/Net-{date}-Fit{sw_fitness:.0}-Apples{apples:.2}({apples_max:.0})-Gen{gen}-Playback.json");
                         let mut file = File::create(filename).unwrap();
                         file.write_all(s.as_bytes()).unwrap();
                     }
@@ -348,7 +378,7 @@ impl NnPlaysSnake {
         self.max_info = global_max_fitness_info;
     }
 
-    pub fn run_one_game(net: &mut Net<MyFitnessInfo>, game: &mut SnakeGame, era_info: &EraInfo) -> MyFitnessInfo {
+    pub fn run_one_game(net: &mut Net<MyFitnessInfo>, game: &mut SnakeGame, era_info: &EraInfo, net_count_in_same_species: f32) -> MyFitnessInfo {
         game.restart(None, None, None);
         let mut moves = 0_usize;
         while game.state == GameState::Running {
@@ -372,7 +402,7 @@ impl NnPlaysSnake {
             apples:  apples  as f32,
             visited: visited as f32,
             moves:   moves   as f32,
-            fitness_weighted_by_species: fitness,
+            fitness_weighted_by_species: fitness / net_count_in_same_species,
         }
     }
 
@@ -484,7 +514,12 @@ impl NnPlaysSnake {
     fn event_resurrect_maxes(&mut self) {
         println!("@@@@ RESURECTION!!! @@@@@@@@@@@@@@@@@");
         for sn in self.stashed_nets.iter() {
-            self.population.nets.push(sn.net.clone());
+            let mut net = sn.net.clone();
+            // We need to recompute fitness for our new environment (set of species, e.g. will have 
+            // changed), so set fitness values to the sentinal value.
+            net.fitness_info.fitness = FITNESS_SENTINAL;
+            net.fitness_info.fitness_weighted_by_species = FITNESS_SENTINAL;
+            self.population.nets.push(net);
         }
     }
 }

@@ -1,31 +1,18 @@
-use std::cmp::Ordering;
 
-use bevy::utils::hashbrown::HashSet;
+use bevy::utils::hashbrown::HashMap;
 use rand::{thread_rng, Rng};
 
-use crate::neural_net::nets::NetId;
+use crate::neural_net::species::SpeciesIndex;
 
 use super::{nets::{MutationParams, Net, NetParams}, species::{AllSpecies, SpeciesMetaParams}};
-
-
-// From NEAT paper:
-// pop = 150 (DPNV used 1000), c1_excess = 1.0, c2_disjoint = 1.0, c3_weights = 0.4 (DPNV used 3.0),
-//    threshold = 3.0 (DPNV used 4.0 because of larger c_weights), gen_w/o_max = 15
-// Best net from each species (if member_count > 5) copied to next generation.
-// 80% chance net having weights mutated (90% uniformly perturbed, 10% chance assigned a new random value)
-// 75% chance inherited gene was disabled if it was disabled in either parent
-// 25% of offspring are result of mutation without crossover.
-// Inter-species mating rate was 0.001.
-// In small populations, probability of adding new node was 0.03, and new link mutation was 0.05.
-// In larger populations, adding new link was 0.30
-// Used modified Sigmoid(x) = 1/(1+e^(4.9x)) at all nodes
-// 
 
 
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopulationParams {
     pub population_size: usize,
+    pub min_required_members_to_forward_best: usize,
+    pub frac_chance_to_cross_globally: f64,
     pub mutation_params: MutationParams,
     pub net_params: NetParams,
     pub species_param: SpeciesMetaParams,
@@ -38,6 +25,11 @@ pub trait FitnessInfo : Clone + Default + std::fmt::Debug {
     fn set_species_weighted_fitness(&mut self, new: f32);
 }
 
+struct NetInfoPerSpecies<Fit> where Fit: FitnessInfo {
+    net_index: usize,
+    fitness_info: Fit,
+    order: usize,
+}
 
 
 pub struct Population<Fit> where Fit: FitnessInfo {
@@ -52,14 +44,11 @@ impl <Fit> Population<Fit> where Fit: FitnessInfo {
         Self {
             nets: Vec::<Net<Fit>>::new(),
             population_params: meta,
-            species: AllSpecies::<Fit> {
-                 meta: species_param,
-                 species: Vec::new(),
-            }
+            species: AllSpecies::new(species_param),
         }
     }
 
-    pub fn run_one_generation(&mut self, mutation_multipier: f64, fitness_of_net: impl FnMut(&mut Net<Fit>) -> Fit) {
+    pub fn run_one_generation(&mut self, mutation_multipier: f64, fitness_of_net: impl FnMut(&mut Net<Fit>, f32) -> Fit) {
         self.create_initial_population();
         self.evaluate_population(fitness_of_net);
         self.create_next_generation(mutation_multipier);
@@ -73,79 +62,121 @@ impl <Fit> Population<Fit> where Fit: FitnessInfo {
             assert!(net.is_evaluation_order_up_to_date);
             self.nets.push(net);
         }
+        self.species.assign_nets_to_species(&mut self.nets);
     }
 
-    pub fn evaluate_population(&mut self, mut f: impl FnMut(&mut Net<Fit>) -> Fit) {
+    pub fn evaluate_population(&mut self, mut f: impl FnMut(&mut Net<Fit>, f32) -> Fit) {
         for net in self.nets.iter_mut() {
-            net.fitness_info = f(net);
+            let net_count_in_same_species = self.species.get(net.species_index.unwrap()).stats.current_count as f32;
+            assert!(net_count_in_same_species >= 1.0);
+            let fitness_info = f(net, net_count_in_same_species);
+            assert!((fitness_info.get_fitness() / net_count_in_same_species - fitness_info.get_species_weighted_fitness()).abs() < 0.001);
+            net.fitness_info = fitness_info;
         }
+        self.species.recompute_species_stats_for_new_generation(&mut self.nets);    // self.nets is now sorted!
     }
 
     pub fn create_next_generation(&mut self, mutation_multiplier: f64) {
-        // Assign nets to species
-        let mut map_species_index_to_count = vec![0_usize; self.species.species.len() + self.nets.len()];
-        for n in self.nets.iter_mut() {
-            let species_index = self.species.find_or_add_species(n);
-            n.species_index = Some(species_index);
-            map_species_index_to_count[species_index.get_ordinal()] += 1;
-        }
-
-        // Weight fitness by species count
-        for n in self.nets.iter_mut() {
-            let fitness_unweighted = n.fitness_info.get_fitness();
-            let species_count = map_species_index_to_count[n.species_index.unwrap().get_ordinal()];
-            assert!(species_count > 0);
-            n.fitness_info.set_species_weighted_fitness(fitness_unweighted / species_count as f32);
-        }
-
-
-        // Sort population by fitness
-        self.nets.sort_by(|a,b| Ordering::reverse(a.fitness_info.get_species_weighted_fitness().partial_cmp(&b.fitness_info.get_species_weighted_fitness()).unwrap()));
-        assert!(self.nets[0].fitness_info.get_species_weighted_fitness() >= self.nets[self.nets.len() - 1].fitness_info.get_species_weighted_fitness());
-        assert!(self.nets[0].fitness_info.get_species_weighted_fitness() >= self.nets[1].fitness_info.get_species_weighted_fitness());
-        let mut nets_already_chosen = HashSet::<NetId>::with_capacity(self.nets.len());
-        //for i in 0..self.nets.len() {
-        //    let net = &self.nets[i];
-        //    println!("i={i}, id={}, fitness={}", net.id, net.fitness);
-        //}
-
-        // Forward propigate most fit nets
+        // Allocate room for next genaration
         let mut nets_new = Vec::<Net<Fit>>::with_capacity(self.nets.len());
-        for i in 0..4 {
-            nets_new.push(self.nets[i].clone());
-            nets_already_chosen.insert(self.nets[i].id);
+
+        // Create separate sorted, per-species list of net information
+        let mut map_species_index_to_net_infos = HashMap::<SpeciesIndex, Vec<NetInfoPerSpecies<Fit>>>::new();
+        for (net_index, n) in self.nets.iter().enumerate() {
+            match map_species_index_to_net_infos.get_mut(&n.species_index.unwrap()) {
+                None => { 
+                    let net_info = NetInfoPerSpecies {
+                        net_index,
+                        fitness_info: n.fitness_info.clone(),
+                        order: 0,
+                    };
+                    map_species_index_to_net_infos.insert(n.species_index.unwrap(), vec![net_info]); 
+                }
+                Some(net_infos) => {
+                    let net_info = NetInfoPerSpecies {
+                        net_index,
+                        fitness_info: n.fitness_info.clone(),
+                        order: net_infos.len(),
+                    };
+                    net_infos.push(net_info); 
+                }
+            }
         }
 
-        // Choose 25% of population randomly from current population, biased by their fitness
-        // ranking.
-        let percent_25 = (self.population_params.population_size as f32 * 0.25).round() as usize;
-        let target = 4 + percent_25;
-        let mut rechosen_count = 0_usize;
-        while nets_new.len() < target {
-            let net_chosen = &self.nets[self.choose()];
-            let is_already_chosen = nets_already_chosen.contains(&net_chosen.id);
-            let new_net = net_chosen.clone();
-            if is_already_chosen { rechosen_count += 1; continue; } // new_net.mutate_self(&self.population_params.mutation_params, mutation_multiplier * 2.0); }
-            nets_new.push(new_net);
-            nets_already_chosen.insert(net_chosen.id);
+        // Copy best nets of each species (if more than 5 members) into next generation
+        for (_, net_info_list) in map_species_index_to_net_infos.iter_mut()
+            .filter(|(_, info_list)| info_list.len() >= self.population_params.min_required_members_to_forward_best) {
+            let net_index = net_info_list[0].net_index;
+            nets_new.push(self.nets[net_index].clone());
         }
-        //println!("Rechosen: {rechosen_count} out of {target}");
+
+        // Remove all nets in the bottom frac_eliminated of their species
+        for (&species_index, net_info_list) in map_species_index_to_net_infos.iter_mut() {
+            let should_eliminate_species = self.species.get(species_index).stats.generations_stagnant > self.population_params.species_param.gen_without_new_max;
+            let trunc = if should_eliminate_species { 0 } else {
+                let len = net_info_list.len();
+                let trunc = len as f32 * (1.0 - self.population_params.species_param.frac_eliminated);
+                let trunc = trunc.round() as usize;
+                assert!(trunc < len || len == 1);
+                trunc
+            };
+            net_info_list.truncate(trunc);
+        }
+
+        // Based on each species' stat.frac_reproduction, add a number of new nets based on this species' old ones
+        let num_to_fill = (self.population_params.population_size - nets_new.len()) as f32;
+        for (&species_index, net_info_list) in map_species_index_to_net_infos.iter() {
+            if net_info_list.is_empty() { continue; }
+            let species = self.species.get(species_index);
+            let num_of_this_species_to_add = species.stats.frac_reproduction * num_to_fill;
+            let target = nets_new.len() + num_of_this_species_to_add.round() as usize;
+            if net_info_list.len() == 1 {
+                let net = &self.nets[net_info_list[0].net_index];
+                while nets_new.len() < target {
+                    let mut net_new = net.clone();
+                    net_new.mutate_self(&self.population_params.mutation_params, mutation_multiplier);
+                    nets_new.push(net_new);
+                }
+            } else {
+                while nets_new.len() < target {
+                    let net_chosen_a = self.choose_from(net_info_list, self.population_params.frac_chance_to_cross_globally);
+                    let net_chosen_b = self.choose_from(net_info_list, self.population_params.frac_chance_to_cross_globally);
+                    if std::ptr::addr_eq(net_chosen_a, net_chosen_b) { continue; }  // Skip if same
+                    let net_new = net_chosen_a.cross_into_new_net(net_chosen_b, &self.population_params.mutation_params, mutation_multiplier);
+                    nets_new.push(net_new);
+                }
+            }
+        }
 
         // Fill out population by randomly choosing nets to cross proportionally by fitness
         while nets_new.len() < self.population_params.population_size {
-            let net_chosen_a = &self.nets[self.choose()];
-            let net_chosen_b = &self.nets[self.choose()];
+            let net_chosen_a = self.choose();
+            let net_chosen_b = self.choose();
             if std::ptr::addr_eq(net_chosen_a, net_chosen_b) { continue; }  // Skip if same
             let net_new = net_chosen_a.cross_into_new_net(net_chosen_b, &self.population_params.mutation_params, mutation_multiplier);
             nets_new.push(net_new);
         }
         self.nets = nets_new;
+        self.species.assign_nets_to_species(&mut self.nets);
     }
 
-    fn choose(&self) -> usize {
+    fn choose_from(&self, net_info_list: &[NetInfoPerSpecies<Fit>], frac_chance_to_cross_globally: f64) -> &Net<Fit> {
+        if thread_rng().gen_bool(frac_chance_to_cross_globally) {
+            return self.choose();
+        }
+        let rand = thread_rng().gen::<f32>();
+        let sq = rand * rand;   // more likely to choose values close to 0.0 than 1.0
+        let index = (sq * net_info_list.len() as f32).round() as usize;
+        let index = index.clamp(0, net_info_list.len() - 1);
+        let info = &net_info_list[index];
+        &self.nets[info.net_index]
+    }
+
+    fn choose(&self) -> &Net<Fit> {
         let rand = thread_rng().gen::<f32>();
         let sq = rand * rand;   // more likely to choose values close to 0.0 than 1.0
         let index = (sq * self.nets.len() as f32).round() as usize;
-        index.clamp(0, self.nets.len() - 1)
+        let index = index.clamp(0, self.nets.len() - 1);
+        &self.nets[index]
     }
 }

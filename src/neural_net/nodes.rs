@@ -4,13 +4,16 @@ use serde::{Serialize, Deserialize};
 
 
 
-static NODE_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
+static NODE_ID_NEXT: AtomicUsize = AtomicUsize::new(10_000);
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(usize);
 
 impl NodeId {
     pub fn new_unique() -> NodeId { NodeId(NODE_ID_NEXT.fetch_add(1, Ordering::SeqCst)) }
+    // Inputs and Outputs must always have fixed IDs
+    pub fn input(i: usize) -> NodeId { NodeId(i) }
+    pub fn output(i: usize) -> NodeId { NodeId(i + 5_500) }
     pub fn get_ordinal(&self) -> usize { self.0 }
 }
 

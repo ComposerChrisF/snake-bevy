@@ -116,19 +116,19 @@ pub struct MutationParams {
 pub struct Net<Fit> where Fit: FitnessInfo {
     pub id: NetId,
     pub net_params: NetParams,
-    nodes: Vec<Node>,
+    pub(crate) nodes: Vec<Node>,
     #[serde(skip_serializing, skip_deserializing)]
     map_node_id_to_index: HashMap<NodeId, NodeIndex>,
     pub(crate) connections: Vec<Connection>,
     #[serde(skip_serializing, skip_deserializing)]
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
-    pub fitness_info: Fit,
+    pub fitness_info: Fit,      // TODO: Split out sw_fitness into direct member of Net, since user of library shouldn't need to manage that field at all!
     #[serde(skip_serializing, skip_deserializing)]
     pub is_evaluation_order_up_to_date: bool,
     #[serde(skip_serializing, skip_deserializing)]
     node_order_list: Vec<NodeIndex>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub species_index: Option<SpeciesIndex>,
+    pub species_index: Option<SpeciesIndex>,    // TODO: This should not be Option<>!!, species should always be available!
 }
 
 impl <Fit> Net<Fit> where Fit: FitnessInfo {
@@ -159,6 +159,8 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             input_connections: Vec::new(),
             value,
         };
+        if id.is_some() { assert!(id.unwrap() == node.id);}
+        if node.layer == Layer::Input { assert!(node.id.get_ordinal() < 30); }
         self.map_node_id_to_index.insert(node.id, node.index);
         self.nodes.push(node);
         index
@@ -202,11 +204,11 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         // NOTE: We add them specifically in this order, so that we can
         // rely on 0..input_count being the inputs, and 
         // input_count..(input_count+output_count) being the outputs!!!
-        for _ in 0..net.net_params.input_count { 
-            net.add_node(None, ActivationFunction::None, Some(Layer::Input), 0.0);
+        for i in 0..net.net_params.input_count { 
+            net.add_node(Some(NodeId::input(i)), ActivationFunction::None, Some(Layer::Input), 0.0);
         }
-        for _ in 0..net.net_params.output_count {
-            net.add_node(None, ActivationFunction::ModSigmoid, Some(Layer::Output), 0.0);
+        for i in 0..net.net_params.output_count {
+            net.add_node(Some(NodeId::output(i)), ActivationFunction::ModSigmoid, Some(Layer::Output), 0.0);
         }
         net
     }
@@ -522,6 +524,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
                 connection_mutate.weight *= (1.0 - (thread_rng().gen::<f32>() * mut_params.max_weight_change_frac)).powf(pow);
             }
         }
+        //// Change a single connection weight
         //let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
         //if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_mutate_weight, mutation_multiplier)) && !connection_index_list.is_empty() {
         //    trace!("Mutating connection weight");
@@ -677,11 +680,11 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         Some(net)
     }
     
-    pub(crate) fn count_excess_disjoint(&self, net2: &Net<Fit>) -> (usize, usize) {
-        let id_max = self.nodes.iter().map(|n| n.id.get_ordinal()).max().unwrap();
-        let (excess_nodes, disjoint_nodes) = net2.nodes.iter()
-            .filter(|&n| !self.map_node_id_to_index.contains_key(&n.id))
-            .fold((0,0), |acc, n| if n.id.get_ordinal() > id_max { 
+    pub(crate) fn count_excess_disjoint(&self, other: &Net<Fit>) -> (usize, usize) {
+        let id_max = self.nodes.iter().map(|node| node.id.get_ordinal()).max().unwrap();
+        let (excess_nodes, disjoint_nodes) = other.nodes.iter()
+            .filter(|&node| !self.map_node_id_to_index.contains_key(&node.id))
+            .fold((0,0), |acc, node| if node.id.get_ordinal() > id_max { 
                     // Excess gene
                     (acc.0 + 1, acc.1    ) 
                 } else { 
@@ -690,7 +693,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
                 }
             );
         let id_max = self.connections.iter().map(|c| c.id.get_ordinal()).max().unwrap_or(0);
-        let (excess_cons, disjoint_cons) = net2.connections.iter()
+        let (excess_cons, disjoint_cons) = other.connections.iter()
             .filter(|&c| !self.map_connection_id_to_index.contains_key(&c.id))
             .fold((0,0), |acc, c| if c.id.get_ordinal() > id_max { 
                     // Excess gene
@@ -703,12 +706,13 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         (excess_nodes + excess_cons, disjoint_nodes + disjoint_cons)
     }
     
-    pub(crate) fn sum_weights_distance_for_common_connections(&self, net2: &Net<Fit>) -> f32 {
-        net2.connections.iter()
-            .filter_map(|c2| 
-                if let Some(&c1_index) = self.map_connection_id_to_index.get(&c2.id) {
-                    let c1 = self.get_connection(c1_index);
-                    Some(c2.weight - c1.weight)
+    pub(crate) fn sum_weights_distance_for_common_connections(&self, other: &Net<Fit>) -> f32 {
+        other.connections.iter()
+            .filter_map(|c_other| 
+                if let Some(&c_index_self) = self.map_connection_id_to_index.get(&c_other.id) {
+                    let c_self = self.get_connection(c_index_self);
+                    //println!("W diff = {};    w_other={} - w_self={}", c_other.weight - c_self.weight, c_other.weight, c_self.weight);
+                    Some(c_other.weight - c_self.weight)
                 } else { None })
             .fold(0.0, |acc, w| acc + w.abs())
     }

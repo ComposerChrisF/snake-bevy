@@ -1,4 +1,35 @@
+use std::sync::atomic::AtomicUsize;
+
+use serde::Serialize;
+
 use super::{nets::Net, populations::FitnessInfo};
+
+
+
+static SPECIES_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
+
+/// The NetId uniquely identifies an instance of a Net.  Used for debug checks to ensure node and
+/// connection indexes can only be used for the Net that generated them.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
+pub struct SpeciesId(pub usize);
+
+impl SpeciesId {
+    pub fn new_unique() -> SpeciesId {
+        SpeciesId(SPECIES_ID_NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+impl std::fmt::Display for SpeciesId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SpeciesId({})", self.0)
+    }
+}
+impl std::fmt::Debug for SpeciesId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SpeciesId({})", self.0)
+    }
+}
+
 
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -113,6 +144,7 @@ impl <Fit> AllSpecies<Fit> where Fit: FitnessInfo {
             }
             // If we get here, then we need to create a new species
             let s_new = SingleSpecies::<Fit> {
+                id: SpeciesId::new_unique(),
                 index: SpeciesIndex(new_species_list.len()),
                 representative: net.clone(),
                 is_extinct: false,
@@ -125,7 +157,6 @@ impl <Fit> AllSpecies<Fit> where Fit: FitnessInfo {
                     current_sw_fitness_ave: 0.0,
                     current_max_sw_fitness: f32::MIN,
                     generations_stagnant: 0,
-                    frac_reproduction: 0.0,
                 }
             };
             net.species_index = Some(s_new.index);
@@ -190,15 +221,6 @@ impl <Fit> AllSpecies<Fit> where Fit: FitnessInfo {
                 stats.generations_stagnant = 0;     // Remove this line to make generations_stagnant only dependent on max single sw_fitness
             }
         }
-
-        // Update frac_reproduction
-        let mut sum_all_current_sw_fiteness_sum = 0.0;
-        for s in self.species_list.iter() {
-            sum_all_current_sw_fiteness_sum += s.stats.current_sw_fitness_sum;
-        }
-        for s in self.species_list.iter_mut() {
-            s.stats.frac_reproduction = s.stats.current_sw_fitness_sum / sum_all_current_sw_fiteness_sum;
-        }
     }
 }
 
@@ -213,11 +235,11 @@ pub struct SpeciesStats {
     pub current_sw_fitness_ave: f32,
     pub current_max_sw_fitness: f32,
     pub generations_stagnant: usize,
-    pub frac_reproduction: f32,         // i.e. single_species.stats.current_sw_fitness_sum  / sum(all current_sw_fitness_sum)
 }
 
 #[derive(Clone, Debug)]
 pub struct SingleSpecies<Fit> where Fit: FitnessInfo  {
+    pub id: SpeciesId,
     pub index: SpeciesIndex,
     pub representative: Net<Fit>,
     pub stats: SpeciesStats,

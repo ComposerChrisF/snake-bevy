@@ -106,6 +106,7 @@ pub struct MutationParams {
 
     pub prob_remove_connection: f64,
     pub prob_add_connection: f64,
+    pub prob_add_connection_large_pop: f64,
     pub prob_remove_node: f64,
     pub prob_add_node: f64,
 }
@@ -330,7 +331,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         f64::min(1.0, p * adjuster)
     }
     
-    pub(super) fn cross_into_new_net(&self, other: &Self, mut_params: &MutationParams, mutation_multiplier: f64) -> Self {
+    pub(super) fn cross_into_new_net(&self, other: &Self, mut_params: &MutationParams, mutation_multiplier: f64, parent_species_population_size: f32) -> Self {
         // Choose a "winning" parent, partially based on fitnesses
         let (winner, loser) = if self.fitness_info.get_fitness() >= other.fitness_info.get_fitness() { (self, other) } else { (other, self) };
         // Small chance to actually choose the "loser" as the winner:
@@ -422,7 +423,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         net_child.verify_invariants();
 
         trace!("NET: {net_child:#?}");
-        net_child.mutate_self(mut_params, mutation_multiplier);
+        net_child.mutate_self(mut_params, mutation_multiplier, parent_species_population_size);
         net_child
     }
 
@@ -502,7 +503,7 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
     }
 
 
-    pub(super) fn mutate_self(&mut self, mut_params: &MutationParams, mutation_multiplier: f64) {
+    pub(super) fn mutate_self(&mut self, mut_params: &MutationParams, mutation_multiplier: f64, parent_species_population_size: f32) {
         let node_index_list   = self.nodes.iter().map(|n| n.index).collect::<Vec<_>>();
         let input_and_hidden  = self.nodes.iter().filter_map(|n| if n.layer != Layer::Output && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
         let hidden_and_output = self.nodes.iter().filter_map(|n| if n.layer != Layer::Input  && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
@@ -548,7 +549,8 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
 
         // Add a connection
         // TODO: Track node connections and re-use connection id if connection is same! (pg 108, section 3.2 para #3)
-        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_add_connection, mutation_multiplier)) && input_and_hidden.len() > 1 {
+        let prob_add_connection = if parent_species_population_size < 100.0 { mut_params.prob_add_connection } else { mut_params.prob_add_connection_large_pop };
+        if thread_rng().gen_bool(Self::adjust_prob(prob_add_connection, mutation_multiplier)) && input_and_hidden.len() > 1 {
             let mut index_from = Self::choose_index(&input_and_hidden);
             let mut index_to   = Self::choose_index_not(&hidden_and_output, index_from);
             let from = self.get_node(index_from);
@@ -747,6 +749,7 @@ mod tests {
         net.verify_invariants();
         let params = MutationParams {
             prob_add_connection: 0.0,
+            prob_add_connection_large_pop: 0.0,
             prob_add_node: 0.0,
             prob_mutate_activation_function_of_node: 0.0,
             prob_mutate_weight: 0.0,
@@ -764,22 +767,22 @@ mod tests {
         let mut param_mutate_af      = params.clone();  param_mutate_af     .prob_mutate_activation_function_of_node = 1.0;
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_add_connection, 1.0);
+        net.mutate_self(&param_add_connection, 1.0, 1.0);
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_add_node, 1.0);
+        net.mutate_self(&param_add_node, 1.0, 1.0);
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_toggle_enabled, 1.0);
+        net.mutate_self(&param_toggle_enabled, 1.0, 1.0);
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_mutate_weight, 1.0);
+        net.mutate_self(&param_mutate_weight, 1.0, 1.0);
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_mutate_weight2, 1.0);
+        net.mutate_self(&param_mutate_weight2, 1.0, 1.0);
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
-        net.mutate_self(&param_mutate_af, 1.0);
+        net.mutate_self(&param_mutate_af, 1.0, 1.0);
     }
 
     #[test]
@@ -788,6 +791,7 @@ mod tests {
         net.verify_invariants();
         let params = MutationParams {
             prob_add_connection: 0.1,
+            prob_add_connection_large_pop: 0.1,
             prob_add_node: 0.1,
             prob_mutate_activation_function_of_node: 0.1,
             prob_mutate_weight: 0.1,
@@ -798,7 +802,7 @@ mod tests {
             prob_remove_node: 0.0,
         };
         for _ in 0..100 {
-            net.mutate_self(&params, 1.0);
+            net.mutate_self(&params, 1.0, 1.0);
         }
         info!("Mutated Net = {net:#?}");
     }
@@ -813,6 +817,7 @@ mod tests {
             net_b.verify_invariants();
             let params = MutationParams {
                 prob_add_connection: 1.0,
+                prob_add_connection_large_pop: 1.0,
                 prob_add_node: 1.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
@@ -823,11 +828,12 @@ mod tests {
                 prob_remove_node: 0.0,
             };
             for _ in 0..5 {
-                net_a.mutate_self(&params, 1.0);
-                net_b.mutate_self(&params, 1.0);
+                net_a.mutate_self(&params, 1.0, 1.0);
+                net_b.mutate_self(&params, 1.0, 1.0);
             }
             let params = MutationParams {
                 prob_add_connection: 0.0,
+                prob_add_connection_large_pop: 0.0,
                 prob_add_node: 0.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
@@ -837,7 +843,7 @@ mod tests {
                 prob_remove_connection: 0.0,
                 prob_remove_node: 1.0,
             };
-            let net_d = net_a.cross_into_new_net(&net_b, &params, 1.0);
+            let net_d = net_a.cross_into_new_net(&net_b, &params, 1.0, 1.0);
             let nodes_a = net_a.nodes.len();
             let nodes_b = net_b.nodes.len();
             let nodes_d = net_d.nodes.len();
@@ -856,6 +862,7 @@ mod tests {
             net_b.verify_invariants();
             let params = MutationParams {
                 prob_add_connection: 1.0,
+                prob_add_connection_large_pop: 1.0,
                 prob_add_node: 1.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
@@ -866,11 +873,12 @@ mod tests {
                 prob_remove_node: 0.0,
             };
             for _ in 0..5 {
-                net_a.mutate_self(&params, 1.0);
-                net_b.mutate_self(&params, 1.0);
+                net_a.mutate_self(&params, 1.0, 1.0);
+                net_b.mutate_self(&params, 1.0, 1.0);
             }
             let params = MutationParams {
                 prob_add_connection: 0.0,
+                prob_add_connection_large_pop: 0.0,
                 prob_add_node: 0.0,
                 prob_mutate_activation_function_of_node: 0.0,
                 prob_mutate_weight: 0.0,
@@ -880,7 +888,7 @@ mod tests {
                 prob_remove_connection: 1.0,
                 prob_remove_node: 0.0,
             };
-            let net_c = net_a.cross_into_new_net(&net_b, &params, 1.0);
+            let net_c = net_a.cross_into_new_net(&net_b, &params, 1.0, 1.0);
             let connections_a = net_a.connections.len();
             let connections_b = net_b.connections.len();
             let connections_c = net_c.connections.len();

@@ -32,7 +32,7 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //          so penalize score." or it's alternate: NSEW inputs that turn 1.0 if that directions closes off an area.)
 // - Consider changing inputs to NSEW distance to obstacle, but also with "lifetime" of obstacle (e.g. walls are 
 //      forever), but snake body depends on how close to tail it is?
-// + Research and implement NEAT techniques for speciation/diversity, rather than my ad hoc stuff.
+// x Research and implement NEAT techniques for speciation/diversity, rather than my ad hoc stuff.
 //      - From NEAT paper:
 //      - pop = 150 (DPNV used 1000), c1_excess = 1.0, c2_disjoint = 1.0, c3_weights = 0.4 (DPNV used 3.0),
 //          threshold = 3.0 (DPNV used 4.0 because of larger c_weights), gen_w/o_max = 15
@@ -44,6 +44,7 @@ use crate::neural_net::{populations::Population, nets::MutationParams};
 //      - In small populations, probability of adding new node was 0.03, and new link mutation was 0.05.
 //      - In larger populations, adding new link was 0.30
 //      - Used modified Sigmoid(x) = 1/(1+e^(4.9x)) at all nodes
+// - BUG: Population is converging into a single species!  Need to figure out why.
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct MyFitnessInfo {
@@ -219,6 +220,7 @@ impl NnPlaysSnake {
                 net_params: Self::new_params(),
                 mutation_params: MutationParams {
                     prob_add_connection: 0.05,
+                    prob_add_connection_large_pop: 0.30,
                     prob_add_node: 0.03,
                     prob_mutate_activation_function_of_node: 0.0,   // 0.02,
                     prob_mutate_weight: 0.80,
@@ -338,7 +340,7 @@ impl NnPlaysSnake {
             let ave_fitness_info = sum_fitnesses_info * (1.0 / games_played_for_fitness as f32);
             let mut final_net_fitness_info = max_single_game_fitness_info * 0.25 + ave_fitness_info * 0.50 + min_single_game_fitness_info * 0.25;
             final_net_fitness_info.fitness_weighted_by_species = final_net_fitness_info.fitness / net_count_in_same_species;    // Set explicitly to avoid rounding errors in sums
-            if generation != 0 && global_max_fitness_info.fitness_weighted_by_species < final_net_fitness_info.fitness_weighted_by_species {
+            if generation != 0 && global_max_fitness_info.fitness < final_net_fitness_info.fitness {
                 println!("New Max  gen={generation}: {}: fitness={final_net_fitness_info}; max={max_single_game_fitness_info}    multiplier={multiplier}", net.id);
                 global_max_fitness_info = final_net_fitness_info;
                 self.stashed_nets.push(StashInfo { 
@@ -352,9 +354,9 @@ impl NnPlaysSnake {
                         let gen = generation;
                         let apples = final_net_fitness_info.apples;
                         let apples_max = max_single_game_fitness_info.apples;
-                        let sw_fitness = final_net_fitness_info.fitness_weighted_by_species;
+                        let fitness = final_net_fitness_info.fitness;
                         let date = chrono::Local::now().format("%Y%m%d");
-                        let filename = format!("stash/Net-{date}-Fit{sw_fitness:.0}-Apples{apples:.2}({apples_max:.0})-Gen{gen}.json");
+                        let filename = format!("stash/Net-{date}-Fit{fitness:.0}-Apples{apples:.2}-Max{apples_max:.0}-Gen{gen}.json");
                         let mut file = File::create(filename).unwrap();
                         file.write_all(s.as_bytes()).unwrap();
                     }
@@ -365,9 +367,9 @@ impl NnPlaysSnake {
                         let gen = generation;
                         let apples = final_net_fitness_info.apples;
                         let apples_max = max_single_game_fitness_info.apples;
-                        let sw_fitness = final_net_fitness_info.fitness_weighted_by_species;
+                        let fitness = final_net_fitness_info.fitness;
                         let date = chrono::Local::now().format("%Y%m%d");
-                        let filename = format!("stash/Net-{date}-Fit{sw_fitness:.0}-Apples{apples:.2}({apples_max:.0})-Gen{gen}-Playback.json");
+                        let filename = format!("stash/Net-{date}-Fit{fitness:.0}-Apples{apples:.2}-Max{apples_max:.0}-Gen{gen}-Playback.json");
                         let mut file = File::create(filename).unwrap();
                         file.write_all(s.as_bytes()).unwrap();
                     }

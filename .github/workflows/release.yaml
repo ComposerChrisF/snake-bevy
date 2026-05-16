@@ -95,7 +95,7 @@ jobs:
           fi
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           lfs: ${{ env.USE_GIT_LFS }}
 
@@ -197,7 +197,7 @@ jobs:
         run: Compress-Archive -Path '${{ env.PACKAGE_NAME }}' -DestinationPath '${{ env.PACKAGE }}${{ matrix.package_ext }}'
 
       - name: Upload package to artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           path: tmp/package/${{ env.PACKAGE }}${{ matrix.package_ext }}
           name: package-${{ matrix.platform }}
@@ -236,7 +236,7 @@ jobs:
     if: ${{ needs.get-itch-target.outputs.itch-target != '' }}
     steps:
       - name: Download all packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: package-*
           path: tmp

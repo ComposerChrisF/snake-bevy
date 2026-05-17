@@ -62,6 +62,7 @@ mod tests {
     use super::ActivationFunction;
 
     #[test]
+    #[allow(clippy::approx_constant)] // -3.1415926 is a test input, not an approximation of -PI.
     fn test_funtions() {
         for (i, &x) in [-2.0, 1.0, 0.0, 123.456, -3.1415926, -0.000001, 4.0].iter().enumerate() {
             assert_eq!( x, ActivationFunction::linear( x));

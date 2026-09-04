@@ -38,11 +38,8 @@ use super::audio::sfx::PlaySfx;
 #[derive(Event, Debug)]
 pub struct UpdateScore(usize);
 
-
-
 #[derive(Event, Debug)]
 pub struct SpawnLevel;
-
 
 #[derive(Component)]
 struct MySnakeGame {
@@ -50,22 +47,27 @@ struct MySnakeGame {
     location_apple_prev: snake_game::GridPoint,
     location_tail_prev: snake_game::GridPoint,
     playback: Option<Playback>,
-    playback_index: usize,      // Current playback location, i.e. playback.playback_events[index]
-    net: Net<MyFitnessInfo>,    // NeuralNet to play game "live".  Avoid Option<Net<MyFitnessInfO>> as this causes mutable borrow problems in code.
+    playback_index: usize, // Current playback location, i.e. playback.playback_events[index]
+    net: Net<MyFitnessInfo>, // NeuralNet to play game "live".  Avoid Option<Net<MyFitnessInfO>> as this causes mutable borrow problems in code.
     is_net_valid: bool,
 }
 
 impl MySnakeGame {
-    pub fn mut_borrow_game_and_net(&mut self, f: impl Fn(&mut snake_game::SnakeGame, &mut Net<MyFitnessInfo>)) {
+    pub fn mut_borrow_game_and_net(
+        &mut self,
+        mut f: impl FnMut(&mut snake_game::SnakeGame, &mut Net<MyFitnessInfo>),
+    ) {
         f(&mut self.snake_game, &mut self.net);
     }
 }
 
-
 pub(super) fn plugin(app: &mut App) {
     // Register (i.e. record) what movement the player takes via keyboard/etc.
     app.register_type::<SnakeMovementController>();
-    app.add_systems(Update, record_movement_controller.in_set(AppSet::RecordInput));
+    app.add_systems(
+        Update,
+        record_movement_controller.in_set(AppSet::RecordInput),
+    );
 
     // Apply movement based on controls.
     app.add_systems(Update, apply_movement.in_set(AppSet::Update));
@@ -78,8 +80,6 @@ pub(super) fn plugin(app: &mut App) {
     app.observe(update_score);
 }
 
-
-
 #[derive(Reflect, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Dir {
     #[default]
@@ -89,13 +89,12 @@ pub enum Dir {
     Right,
 }
 
-
 impl Dir {
     pub fn to_snake_direction(self) -> snake_game::Direction {
         match self {
-            Dir::Up    => snake_game::Direction::North,
-            Dir::Down  => snake_game::Direction::South,
-            Dir::Left  => snake_game::Direction::West,
+            Dir::Up => snake_game::Direction::North,
+            Dir::Down => snake_game::Direction::South,
+            Dir::Left => snake_game::Direction::West,
             Dir::Right => snake_game::Direction::East,
         }
     }
@@ -119,64 +118,86 @@ fn record_movement_controller(
     // FUTURE: Ignore reversing direction, since this always produces a crash
     if input.pressed(KeyCode::KeyW) || input.pressed(KeyCode::ArrowUp) {
         player_movement_intent = Some(Dir::Up);
-        if input.just_pressed(KeyCode::KeyW) || input.just_pressed(KeyCode::ArrowUp)    { should_reset_timer = true; }
+        if input.just_pressed(KeyCode::KeyW) || input.just_pressed(KeyCode::ArrowUp) {
+            should_reset_timer = true;
+        }
     }
     if input.pressed(KeyCode::KeyS) || input.pressed(KeyCode::ArrowDown) {
         player_movement_intent = Some(Dir::Down);
-        if input.just_pressed(KeyCode::KeyS) || input.just_pressed(KeyCode::ArrowDown)  { should_reset_timer = true; }
+        if input.just_pressed(KeyCode::KeyS) || input.just_pressed(KeyCode::ArrowDown) {
+            should_reset_timer = true;
+        }
     }
     if input.pressed(KeyCode::KeyA) || input.pressed(KeyCode::ArrowLeft) {
         player_movement_intent = Some(Dir::Left);
-        if input.just_pressed(KeyCode::KeyA) || input.just_pressed(KeyCode::ArrowLeft)  { should_reset_timer = true; }
+        if input.just_pressed(KeyCode::KeyA) || input.just_pressed(KeyCode::ArrowLeft) {
+            should_reset_timer = true;
+        }
     }
     if input.pressed(KeyCode::KeyD) || input.pressed(KeyCode::ArrowRight) {
         player_movement_intent = Some(Dir::Right);
-        if input.just_pressed(KeyCode::KeyD) || input.just_pressed(KeyCode::ArrowRight) { should_reset_timer = true; }
+        if input.just_pressed(KeyCode::KeyD) || input.just_pressed(KeyCode::ArrowRight) {
+            should_reset_timer = true;
+        }
     }
 
     let mut should_toggle_pause = false;
-    if input.just_pressed(KeyCode::KeyP) || input.just_pressed(KeyCode::Pause) || input.just_pressed(KeyCode::MediaPlayPause) { should_toggle_pause = true; }
+    if input.just_pressed(KeyCode::KeyP)
+        || input.just_pressed(KeyCode::Pause)
+        || input.just_pressed(KeyCode::MediaPlayPause)
+    {
+        should_toggle_pause = true;
+    }
 
     const RATIO: f64 = 0.9;
     const INV_RATIO: f64 = 1.0 / RATIO;
     let mut speed_mult = None;
-    if input.just_pressed(KeyCode::Equal) { speed_mult = Some(RATIO); }
-    if input.just_pressed(KeyCode::Minus) { speed_mult = Some(INV_RATIO); }
+    if input.just_pressed(KeyCode::Equal) {
+        speed_mult = Some(RATIO);
+    }
+    if input.just_pressed(KeyCode::Minus) {
+        speed_mult = Some(INV_RATIO);
+    }
 
     // TODO: Add keys to change to prev/next playback.json!
 
     // Apply movement intent to controllers.
     let player_intends_to_move = player_movement_intent.is_some();
-    let player_provided_input = player_intends_to_move || should_toggle_pause || speed_mult.is_some();
+    let player_provided_input =
+        player_intends_to_move || should_toggle_pause || speed_mult.is_some();
     if player_provided_input {
         for (mut controller, mut last_update) in &mut controller_query {
-            if player_intends_to_move { 
-                controller.player_movement_intent = player_movement_intent; 
-                if should_reset_timer { *last_update = LastUpdate(0.0); }
+            if player_intends_to_move {
+                controller.player_movement_intent = player_movement_intent;
+                if should_reset_timer {
+                    *last_update = LastUpdate(0.0);
+                }
             }
-            if should_toggle_pause { controller.is_paused = !controller.is_paused; }
-            if let Some(mult) = speed_mult { controller.speed *= mult; }
+            if should_toggle_pause {
+                controller.is_paused = !controller.is_paused;
+            }
+            if let Some(mult) = speed_mult {
+                controller.speed *= mult;
+            }
         }
     }
 }
 
-
-
-const TILE_CRASH:         u32 = 0;
-const TILE_APPLE:         u32 = 1;
-const TILE_WALL:          u32 = 2;
-const _TILE_SNAKE_HEAD:   u32 = 3;
-const TILE_SNAKE_BODY:    u32 = 4;
-const TILE_SNAKE_HEAD_N:  u32 = 5;
-const TILE_SNAKE_HEAD_E:  u32 = 6;
-const TILE_SNAKE_HEAD_S:  u32 = 7;
-const TILE_SNAKE_HEAD_W:  u32 = 8;
+const TILE_CRASH: u32 = 0;
+const TILE_APPLE: u32 = 1;
+const TILE_WALL: u32 = 2;
+const _TILE_SNAKE_HEAD: u32 = 3;
+const TILE_SNAKE_BODY: u32 = 4;
+const TILE_SNAKE_HEAD_N: u32 = 5;
+const TILE_SNAKE_HEAD_E: u32 = 6;
+const TILE_SNAKE_HEAD_S: u32 = 7;
+const TILE_SNAKE_HEAD_W: u32 = 8;
 const TILE_SNAKE_BODY_NS: u32 = 9;
 const TILE_SNAKE_BODY_EW: u32 = 10;
-const TILE_SNAKE_TAIL_N:  u32 = 11;
-const TILE_SNAKE_TAIL_E:  u32 = 12;
-const TILE_SNAKE_TAIL_S:  u32 = 13;
-const TILE_SNAKE_TAIL_W:  u32 = 14;
+const TILE_SNAKE_TAIL_N: u32 = 11;
+const TILE_SNAKE_TAIL_E: u32 = 12;
+const TILE_SNAKE_TAIL_S: u32 = 13;
+const TILE_SNAKE_TAIL_W: u32 = 14;
 const TILE_SNAKE_BODY_NE: u32 = 15;
 const TILE_SNAKE_BODY_SE: u32 = 16;
 const TILE_SNAKE_BODY_SW: u32 = 17;
@@ -184,25 +205,33 @@ const TILE_SNAKE_BODY_NW: u32 = 18;
 // FUTURE: Body containing apple NW/EW/etc.
 // FUTURE: Head eating apple N/S/E/W
 
-
 fn tile_texture_index_of_cell_kind(kind: snake_game::CellKind) -> Option<u32> {
     match kind {
         snake_game::CellKind::Empty => None,
         snake_game::CellKind::Crash => Some(TILE_CRASH),
         snake_game::CellKind::Apple => Some(TILE_APPLE),
-        snake_game::CellKind::Wall  => Some(TILE_WALL),
+        snake_game::CellKind::Wall => Some(TILE_WALL),
         snake_game::CellKind::Snake => Some(TILE_SNAKE_BODY),
     }
 }
 
-
-
-fn copy_grid_into_tilemap(grid: &snake_game::Grid, tilemap_entity: Entity, tile_storage: &mut TileStorage, map_size: &TilemapSize, commands: &mut Commands) {
+fn copy_grid_into_tilemap(
+    grid: &snake_game::Grid,
+    tilemap_entity: Entity,
+    tile_storage: &mut TileStorage,
+    map_size: &TilemapSize,
+    commands: &mut Commands,
+) {
     for x in 0..map_size.x {
         for y in 0..map_size.y {
             let tile_pos = TilePos { x, y };
-            let cell = grid.get_cell(snake_game::GridPoint { x: x as i16, y: y as i16 });
-            if cell.kind == snake_game::CellKind::Snake { continue; }   // Don't copy the snake; use copy_snake_into_tilemap() for that.
+            let cell = grid.get_cell(snake_game::GridPoint {
+                x: x as i16,
+                y: y as i16,
+            });
+            if cell.kind == snake_game::CellKind::Snake {
+                continue;
+            } // Don't copy the snake; use copy_snake_into_tilemap() for that.
             let tile_texture_index = tile_texture_index_of_cell_kind(cell.kind);
             if let Some(tile_texture_index) = tile_texture_index {
                 let tile_entity = commands
@@ -221,60 +250,66 @@ fn copy_grid_into_tilemap(grid: &snake_game::Grid, tilemap_entity: Entity, tile_
 
 fn dir_of_offset(offset: snake_game::GridPoint) -> Dir {
     match (offset.x, offset.y) {
-        ( 0,  1) => Dir::Up,
-        ( 1,  0) => Dir::Right,
-        ( 0, -1) => Dir::Down,
-        (-1,  0) => Dir::Left,
+        (0, 1) => Dir::Up,
+        (1, 0) => Dir::Right,
+        (0, -1) => Dir::Down,
+        (-1, 0) => Dir::Left,
         _ => panic!("Unexpected offset in dir_of_offset()"),
     }
 }
 
 fn tile_texture_index_of_tail_and_direction(dir: Dir) -> u32 {
     match dir {
-        Dir::Up    => TILE_SNAKE_TAIL_N,
+        Dir::Up => TILE_SNAKE_TAIL_N,
         Dir::Right => TILE_SNAKE_TAIL_E,
-        Dir::Down  => TILE_SNAKE_TAIL_S,
-        Dir::Left  => TILE_SNAKE_TAIL_W,
+        Dir::Down => TILE_SNAKE_TAIL_S,
+        Dir::Left => TILE_SNAKE_TAIL_W,
     }
 }
 
 fn tile_texture_index_of_head_and_direction(dir: Dir) -> u32 {
     match dir {
-        Dir::Up    => TILE_SNAKE_HEAD_N,
+        Dir::Up => TILE_SNAKE_HEAD_N,
         Dir::Right => TILE_SNAKE_HEAD_E,
-        Dir::Down  => TILE_SNAKE_HEAD_S,
-        Dir::Left  => TILE_SNAKE_HEAD_W,
+        Dir::Down => TILE_SNAKE_HEAD_S,
+        Dir::Left => TILE_SNAKE_HEAD_W,
     }
 }
 
 fn tile_texture_index_of_prev_and_next_directions(dir_prev: Dir, dir_next: Dir) -> u32 {
     match (dir_prev, dir_next) {
-        (Dir::Up, Dir::Up)    => TILE_SNAKE_BODY_NS,
+        (Dir::Up, Dir::Up) => TILE_SNAKE_BODY_NS,
         (Dir::Up, Dir::Right) => TILE_SNAKE_BODY_SE,
-        (Dir::Up, Dir::Down)  => TILE_CRASH,
-        (Dir::Up, Dir::Left)  => TILE_SNAKE_BODY_SW,
+        (Dir::Up, Dir::Down) => TILE_CRASH,
+        (Dir::Up, Dir::Left) => TILE_SNAKE_BODY_SW,
 
-        (Dir::Right, Dir::Up)    => TILE_SNAKE_BODY_NW,
+        (Dir::Right, Dir::Up) => TILE_SNAKE_BODY_NW,
         (Dir::Right, Dir::Right) => TILE_SNAKE_BODY_EW,
-        (Dir::Right, Dir::Down)  => TILE_SNAKE_BODY_SW,
-        (Dir::Right, Dir::Left)  => TILE_CRASH,
+        (Dir::Right, Dir::Down) => TILE_SNAKE_BODY_SW,
+        (Dir::Right, Dir::Left) => TILE_CRASH,
 
-        (Dir::Down, Dir::Up)    => TILE_CRASH,
+        (Dir::Down, Dir::Up) => TILE_CRASH,
         (Dir::Down, Dir::Right) => TILE_SNAKE_BODY_NE,
-        (Dir::Down, Dir::Down)  => TILE_SNAKE_BODY_NS,
-        (Dir::Down, Dir::Left)  => TILE_SNAKE_BODY_NW,
+        (Dir::Down, Dir::Down) => TILE_SNAKE_BODY_NS,
+        (Dir::Down, Dir::Left) => TILE_SNAKE_BODY_NW,
 
-        (Dir::Left, Dir::Up)    => TILE_SNAKE_BODY_NE,
+        (Dir::Left, Dir::Up) => TILE_SNAKE_BODY_NE,
         (Dir::Left, Dir::Right) => TILE_CRASH,
-        (Dir::Left, Dir::Down)  => TILE_SNAKE_BODY_SE,
-        (Dir::Left, Dir::Left)  => TILE_SNAKE_BODY_EW,
+        (Dir::Left, Dir::Down) => TILE_SNAKE_BODY_SE,
+        (Dir::Left, Dir::Left) => TILE_SNAKE_BODY_EW,
     }
 }
 
-fn copy_snake_into_tilemap(snake_locations: &VecDeque<snake_game::GridPoint>, tilemap_entity: Entity, tile_storage: &mut TileStorage, commands: &mut Commands) {
+fn copy_snake_into_tilemap(
+    snake_locations: &VecDeque<snake_game::GridPoint>,
+    tilemap_entity: Entity,
+    tile_storage: &mut TileStorage,
+    commands: &mut Commands,
+) {
     assert!(snake_locations.len() >= 2);
     let snake_length = snake_locations.len();
-    for (i, &pt) in snake_locations.iter().enumerate() {    // Iterates from head (at snake_locations[0]) to tail (at snake_locations[len - 1])
+    for (i, &pt) in snake_locations.iter().enumerate() {
+        // Iterates from head (at snake_locations[0]) to tail (at snake_locations[len - 1])
         let is_tail = i == snake_length - 1;
         let is_head = i == 0;
         // Compute texture, based on head/body/tail calculations:
@@ -287,10 +322,16 @@ fn copy_snake_into_tilemap(snake_locations: &VecDeque<snake_game::GridPoint>, ti
         } else {
             let pt_prev = snake_locations[i + 1];
             let pt_next = snake_locations[i - 1];
-            tile_texture_index_of_prev_and_next_directions(dir_of_offset(pt - pt_prev), dir_of_offset(pt_next - pt))
+            tile_texture_index_of_prev_and_next_directions(
+                dir_of_offset(pt - pt_prev),
+                dir_of_offset(pt_next - pt),
+            )
         };
         // Now place tiles
-        let tile_pos = TilePos { x: pt.x as u32, y: pt.y as u32 };
+        let tile_pos = TilePos {
+            x: pt.x as u32,
+            y: pt.y as u32,
+        };
         let tile_entity = commands
             .spawn(TileBundle {
                 position: tile_pos,
@@ -303,7 +344,6 @@ fn copy_snake_into_tilemap(snake_locations: &VecDeque<snake_game::GridPoint>, ti
     }
 }
 
-
 fn spawn_level(
     _trigger: Trigger<SpawnLevel>,
     mut commands: Commands,
@@ -313,26 +353,45 @@ fn spawn_level(
     // Load Playback, if specified on commandline
     let playback = if let Some(path_playback_file) = &args.playback {
         Playback::load_from_file(path_playback_file)
-    } else { None };
+    } else {
+        None
+    };
     let net = if let Some(path_neuralnet_file) = &args.net {
         Net::<MyFitnessInfo>::load_from_file::<MyFitnessInfo>(path_neuralnet_file)
-    } else { None };
+    } else {
+        None
+    };
 
     // Create the underlying snake_game--essentially our data model
     let snake_game = snake_game::SnakeGame::new();
 
     // Create and insert the TileMap
     let tilemap_entity = commands.spawn_empty().id();
-    let map_size = TilemapSize { x: snake_game.grid.width as u32, y: snake_game.grid.height as u32 };
+    let map_size = TilemapSize {
+        x: snake_game.grid.width as u32,
+        y: snake_game.grid.height as u32,
+    };
     let mut tile_storage = TileStorage::empty(map_size);
     let map_type = TilemapType::Square;
-    copy_grid_into_tilemap(&snake_game.grid, tilemap_entity, &mut tile_storage, &map_size, &mut commands);
-    copy_snake_into_tilemap(&snake_game.snake.locations, tilemap_entity, &mut tile_storage, &mut commands);
+    copy_grid_into_tilemap(
+        &snake_game.grid,
+        tilemap_entity,
+        &mut tile_storage,
+        &map_size,
+        &mut commands,
+    );
+    copy_snake_into_tilemap(
+        &snake_game.snake.locations,
+        tilemap_entity,
+        &mut tile_storage,
+        &mut commands,
+    );
     let tile_pixel_size = TilemapTileSize { x: 16.0, y: 16.0 };
     let grid_size = tile_pixel_size.into();
     let texture_handle: Handle<Image> = image_handles[&ImageKey::SnakeTiles].clone_weak(); //asset_server.load("images/snake_tiles.png");
-    commands.entity(tilemap_entity).insert(
-        TilemapBundle {
+    commands
+        .entity(tilemap_entity)
+        .insert(TilemapBundle {
             grid_size,
             size: map_size,
             storage: tile_storage,
@@ -341,16 +400,20 @@ fn spawn_level(
             tile_size: tile_pixel_size,
             transform: get_tilemap_center_transform(&map_size, &grid_size, &map_type, 0.0),
             ..Default::default()
-        }
-    ).insert(StateScoped(Screen::Playing));
+        })
+        .insert(StateScoped(Screen::Playing));
 
     // Init and insert the MySnakeGame
     let location_apple_prev = snake_game.apple.location;
     let location_tail_prev = snake_game.snake.locations[snake_game.snake.locations.len() - 1];
     let is_net_valid = net.is_some();
-    let net = if let Some(net) = net { net } else { Net::new(NnPlaysSnake::new_params()) };
+    let net = if let Some(net) = net {
+        net
+    } else {
+        Net::new(NnPlaysSnake::new_params())
+    };
     commands.spawn((
-        MySnakeGame { 
+        MySnakeGame {
             snake_game,
             location_apple_prev,
             location_tail_prev,
@@ -360,7 +423,11 @@ fn spawn_level(
             is_net_valid,
         },
         LastUpdate(0.0),
-        SnakeMovementController { player_movement_intent: None, is_paused: false, speed: 0.1 },
+        SnakeMovementController {
+            player_movement_intent: None,
+            is_paused: false,
+            speed: 0.1,
+        },
         StateScoped(Screen::Playing),
     ));
 
@@ -376,13 +443,13 @@ fn spawn_level(
         )
         .with_text_justify(JustifyText::Center)
         .with_style(bevy::ui::Style {
-             position_type: PositionType::Absolute,
-             //align_items: AlignItems::Center,
-             //align_content: AlignContent::Center,
-             left: Val::Percent(0.0),
-             width: Val::Percent(100.0),
-             top: Val::Px(0.0),
-             ..default()
+            position_type: PositionType::Absolute,
+            //align_items: AlignItems::Center,
+            //align_content: AlignContent::Center,
+            left: Val::Percent(0.0),
+            width: Val::Percent(100.0),
+            top: Val::Px(0.0),
+            ..default()
         }),
         Score,
         StateScoped(Screen::Playing),
@@ -392,17 +459,13 @@ fn spawn_level(
 #[derive(Component)]
 struct Score;
 
-fn update_score(
-    trigger: Trigger<UpdateScore>,
-    mut query: Query<&mut Text, With<Score>>,
-) {
+fn update_score(trigger: Trigger<UpdateScore>, mut query: Query<&mut Text, With<Score>>) {
     info!("update_score(): {}", trigger.event().0);
     let new_score = trigger.event().0;
     for mut text in query.iter_mut() {
         text.sections[0].value = format!("Score: {new_score}");
     }
 }
-
 
 #[derive(Component)]
 struct LastUpdate(f64);
@@ -415,7 +478,9 @@ fn apply_movement(
     mut tile_texture_query: Query<&mut TileTextureIndex>,
 ) {
     for (mut my_snake_game, mut last_update, movement) in snake_query.iter_mut() {
-        if movement.is_paused { continue; } 
+        if movement.is_paused {
+            continue;
+        }
         let player_dir = movement.player_movement_intent;
         let have_player_movement = player_dir.is_some();
         let have_playback = my_snake_game.playback.is_some();
@@ -423,14 +488,20 @@ fn apply_movement(
         if have_player_movement || have_playback || have_net {
             let current_time = time.elapsed_seconds_f64();
             if current_time - last_update.0 > movement.speed {
-                let mut direction = if let Some(dir) = player_dir { dir.to_snake_direction() } else { snake_game::Direction::North };
+                let mut direction = if let Some(dir) = player_dir {
+                    dir.to_snake_direction()
+                } else {
+                    snake_game::Direction::North
+                };
                 let mut new_apple_location = None;
                 if let Some(playback) = my_snake_game.playback.as_ref() {
                     let evt = playback.playback_events[my_snake_game.playback_index];
                     match evt {
                         PlaybackEvents::NewAppleLocation(pt) => new_apple_location = Some(pt),
-                        PlaybackEvents::GameOver => { return; }
-                        PlaybackEvents::MoveSnake(d) => { 
+                        PlaybackEvents::GameOver => {
+                            return;
+                        }
+                        PlaybackEvents::MoveSnake(d) => {
                             let i_next = my_snake_game.playback_index + 1;
                             if i_next < playback.playback_events.len() {
                                 let evt_next = playback.playback_events[i_next];
@@ -441,36 +512,61 @@ fn apply_movement(
                             }
                             direction = d;
                         }
-                        PlaybackEvents::NewGame(pt_apple, pt_head, pt_tail) => { 
-                            let (mut tile_storage, tilemap_entity) = tilemap_query.get_single_mut().unwrap();
-                            update_tilemap_at_point(my_snake_game.snake_game.snake.head_location, None, &mut commands, tilemap_entity, &mut tile_storage, &mut tile_texture_query);
-                            my_snake_game.snake_game.restart(Some(pt_apple), Some(pt_head), Some(pt_tail));
-                            my_snake_game.playback_index += 1; 
-                            continue; 
+                        PlaybackEvents::NewGame(pt_apple, pt_head, pt_tail) => {
+                            let (mut tile_storage, tilemap_entity) =
+                                tilemap_query.get_single_mut().unwrap();
+                            update_tilemap_at_point(
+                                my_snake_game.snake_game.snake.head_location,
+                                None,
+                                &mut commands,
+                                tilemap_entity,
+                                &mut tile_storage,
+                                &mut tile_texture_query,
+                            );
+                            my_snake_game.snake_game.restart(
+                                Some(pt_apple),
+                                Some(pt_head),
+                                Some(pt_tail),
+                            );
+                            my_snake_game.playback_index += 1;
+                            continue;
                         }
                     }
                     my_snake_game.playback_index += 1;
                 } else if have_net {
-                    my_snake_game.mut_borrow_game_and_net(|game, net|{
-                        NnPlaysSnake::collect_and_apply_inputs(net, game);
+                    let mut is_safe = [true, true, true, true];
+                    my_snake_game.mut_borrow_game_and_net(|game, net| {
+                        is_safe = NnPlaysSnake::collect_and_apply_inputs(net, game);
                         net.evaluate();
                     });
-                    direction = NnPlaysSnake::interpret_outputs(&my_snake_game.net);
+                    let (_penalties, d) =
+                        NnPlaysSnake::interpret_outputs(&my_snake_game.net, is_safe);
+                    direction = d;
                 }
                 //println!("TICK: player={have_player_movement}, playback={have_playback}, dir={direction:?}, apple={new_apple_location:?}");
-                
+
                 let prev_apples_eaten = my_snake_game.snake_game.apples_eaten;
                 let prev_snake_len = my_snake_game.snake_game.snake.locations.len();
                 let prev_game_state = my_snake_game.snake_game.state;
-                my_snake_game.snake_game.move_snake(direction, new_apple_location);
+                my_snake_game
+                    .snake_game
+                    .move_snake(direction, new_apple_location);
                 let (tile_storage, tilemap_entity) = tilemap_query.get_single_mut().unwrap();
-                update_tilemap(&mut commands, &mut my_snake_game, tilemap_entity, tile_storage, &mut tile_texture_query);
+                update_tilemap(
+                    &mut commands,
+                    &mut my_snake_game,
+                    tilemap_entity,
+                    tile_storage,
+                    &mut tile_texture_query,
+                );
                 if prev_apples_eaten != my_snake_game.snake_game.apples_eaten {
                     commands.trigger(UpdateScore(my_snake_game.snake_game.apples_eaten));
                 }
 
                 // Generate sound
-                if prev_game_state != my_snake_game.snake_game.state && my_snake_game.snake_game.state == GameState::GameOver {
+                if prev_game_state != my_snake_game.snake_game.state
+                    && my_snake_game.snake_game.state == GameState::GameOver
+                {
                     commands.trigger(PlaySfx::Key(SfxKey::Crash(0)));
                 } else if prev_apples_eaten != my_snake_game.snake_game.apples_eaten {
                     commands.trigger(PlaySfx::Key(SfxKey::Eating(0)));
@@ -485,7 +581,6 @@ fn apply_movement(
     }
 }
 
-
 fn update_tilemap(
     commands: &mut Commands,
     my_snake_game: &mut Mut<MySnakeGame>,
@@ -499,17 +594,17 @@ fn update_tilemap(
 
     let is_game_over = snake_game.state == snake_game::GameState::GameOver;
     //if is_game_over { return; }   // We *could*n short-circuit updating, but only if we track whether we've already updated once after a game over
-    
-    // We don't need to update the *entire* map, just the locations where things might have 
+
+    // We don't need to update the *entire* map, just the locations where things might have
     // changed (see comments on SnakeGame::move_snake() for details):
-    // 1. The following snake location tiles must be recomputed: 
+    // 1. The following snake location tiles must be recomputed:
     //     a. Head of the snake
     //         i. Normally based on movement from previous tile...
     //         ii. ...unless GameState is GameOver, then the head of the snake should be a crash.
     //     b. the tile that previously had been the head of the snake
     //     c. the tile that previously had been the tail becomes empty
     //     d. the new tail (based on the movement to the next tile)
-    // 2. If the apple moved, then 
+    // 2. If the apple moved, then
     //     a. the old apple location must either be empty or a snake
     //     b. the new apple location is an apple.
     let locations = &snake_game.snake.locations;
@@ -521,13 +616,20 @@ fn update_tilemap(
     let pt_apple = snake_game.apple.location;
 
     // Snake head
-    let tile_texture_index_head = if is_game_over { 
-        TILE_CRASH 
-    } else { 
+    let tile_texture_index_head = if is_game_over {
+        TILE_CRASH
+    } else {
         let dir_head = dir_of_offset(pt_head - pt_head_prev);
         tile_texture_index_of_head_and_direction(dir_head)
     };
-    update_tilemap_at_point(pt_head, Some(tile_texture_index_head), commands, tilemap_entity, &mut tile_storage, tile_texture_query);
+    update_tilemap_at_point(
+        pt_head,
+        Some(tile_texture_index_head),
+        commands,
+        tilemap_entity,
+        &mut tile_storage,
+        tile_texture_query,
+    );
 
     // Previous head (only if snake is longer than 2)
     let has_prev_head_that_is_not_tail = len > 2;
@@ -535,8 +637,16 @@ fn update_tilemap(
         let pt_head_prev_prev = locations[2];
         let dir_head = dir_of_offset(pt_head - pt_head_prev);
         let dir_head_prev = dir_of_offset(pt_head_prev - pt_head_prev_prev);
-        let tile_texture_index_head_prev = tile_texture_index_of_prev_and_next_directions(dir_head_prev, dir_head);
-        update_tilemap_at_point(pt_head_prev, Some(tile_texture_index_head_prev), commands, tilemap_entity, &mut tile_storage, tile_texture_query);
+        let tile_texture_index_head_prev =
+            tile_texture_index_of_prev_and_next_directions(dir_head_prev, dir_head);
+        update_tilemap_at_point(
+            pt_head_prev,
+            Some(tile_texture_index_head_prev),
+            commands,
+            tilemap_entity,
+            &mut tile_storage,
+            tile_texture_query,
+        );
     }
 
     // Snake Tail
@@ -545,13 +655,27 @@ fn update_tilemap(
         // Erase old tail, unless the snake head replaces it (in which it's already been placed in tilemap)
         let has_head_replaced_tail = pt_head == pt_tail_prev;
         if !pt_tail_prev.is_zero() && !has_head_replaced_tail {
-            update_tilemap_at_point(pt_tail_prev, None, commands, tilemap_entity, &mut tile_storage, tile_texture_query);
+            update_tilemap_at_point(
+                pt_tail_prev,
+                None,
+                commands,
+                tilemap_entity,
+                &mut tile_storage,
+                tile_texture_query,
+            );
         }
 
         // Now update the tile for the new tail
         let dir_tail = dir_of_offset(pt_almost_tail - pt_tail);
         let tile_texture_index_tail = tile_texture_index_of_tail_and_direction(dir_tail);
-        update_tilemap_at_point(pt_tail, Some(tile_texture_index_tail), commands, tilemap_entity, &mut tile_storage, tile_texture_query);
+        update_tilemap_at_point(
+            pt_tail,
+            Some(tile_texture_index_tail),
+            commands,
+            tilemap_entity,
+            &mut tile_storage,
+            tile_texture_query,
+        );
         my_snake_game.location_tail_prev = pt_tail;
     }
 
@@ -561,10 +685,24 @@ fn update_tilemap(
         // Erase old apple unless eaten by snake (in which case the tile has already been covered by snake head)
         let was_old_apple_eaten = !pt_apple_prev.is_zero() && pt_apple_prev == pt_head;
         if !was_old_apple_eaten {
-            update_tilemap_at_point(pt_apple_prev, None, commands, tilemap_entity, &mut tile_storage, tile_texture_query);
+            update_tilemap_at_point(
+                pt_apple_prev,
+                None,
+                commands,
+                tilemap_entity,
+                &mut tile_storage,
+                tile_texture_query,
+            );
         }
         // Draw new apple
-        update_tilemap_at_point(pt_apple, Some(TILE_APPLE), commands, tilemap_entity, &mut tile_storage, tile_texture_query);
+        update_tilemap_at_point(
+            pt_apple,
+            Some(TILE_APPLE),
+            commands,
+            tilemap_entity,
+            &mut tile_storage,
+            tile_texture_query,
+        );
         my_snake_game.location_apple_prev = pt_apple;
     }
 }
@@ -577,17 +715,23 @@ fn update_tilemap_at_point(
     tile_storage: &mut Mut<TileStorage>,
     tile_texture_query: &mut Query<&mut TileTextureIndex>,
 ) {
-    let tile_position = TilePos { x: pt.x as u32, y: pt.y as u32 };
+    let tile_position = TilePos {
+        x: pt.x as u32,
+        y: pt.y as u32,
+    };
     let tile = tile_storage.get(&tile_position);
     //info!("grid_change: location={pt:#?}, CellKind={:#?}, tile found={tile:?}", cell.kind);
     match (tile_texture_index, tile) {
-        (None, None) => { /* Nothing to do. */ info!("BUG: Updating a non-existent tile to be a non-existent tile."); }
-        (None, Some(tile)) => { 
+        (None, None) => {
+            /* Nothing to do. */
+            info!("BUG: Updating a non-existent tile to be a non-existent tile.");
+        }
+        (None, Some(tile)) => {
             // Remove from Tilemap
             tile_storage.remove(&tile_position);
             commands.entity(tile).despawn();
         }
-        (Some(tile_texture_index), None) => { 
+        (Some(tile_texture_index), None) => {
             // Create new tile entity
             let tile_entity = commands
                 .spawn(TileBundle {
@@ -600,7 +744,7 @@ fn update_tilemap_at_point(
             // Add tile entity to Tilemap
             tile_storage.set(&tile_position, tile_entity);
         }
-        (Some(tile_texture_index), Some(tile)) => { 
+        (Some(tile_texture_index), Some(tile)) => {
             // Change texture of tile already in Tilemap
             if let Ok(mut current_texture) = tile_texture_query.get_mut(tile) {
                 current_texture.0 = tile_texture_index;

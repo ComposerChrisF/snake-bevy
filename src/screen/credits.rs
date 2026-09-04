@@ -38,8 +38,7 @@ fn enter_credits(mut commands: Commands) {
             children.label("Permission granted for splash screen use when unmodified.");
             children.label("Music - CC BY 3.0 by Kevin MacLeod");
 
-            children.button("Back")
-            .insert(CreditsAction::Back);
+            children.button("Back").insert(CreditsAction::Back);
         });
 
     commands.trigger(PlaySoundtrack::Key(SoundtrackKey::Credits));

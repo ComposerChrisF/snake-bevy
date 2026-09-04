@@ -1,8 +1,13 @@
-use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
-use super::{activation_functions::ActivationFunction, layers::Layer, nets::{ConnectionIndex, NodeIndex}};
-use serde::{Serialize, Deserialize};
-
-
+use super::{
+    activation_functions::ActivationFunction,
+    layers::Layer,
+    nets::{ConnectionIndex, NodeIndex},
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 static NODE_ID_NEXT: AtomicUsize = AtomicUsize::new(10_000);
 
@@ -10,11 +15,19 @@ static NODE_ID_NEXT: AtomicUsize = AtomicUsize::new(10_000);
 pub struct NodeId(usize);
 
 impl NodeId {
-    pub fn new_unique() -> NodeId { NodeId(NODE_ID_NEXT.fetch_add(1, Ordering::SeqCst)) }
+    pub fn new_unique() -> NodeId {
+        NodeId(NODE_ID_NEXT.fetch_add(1, Ordering::SeqCst))
+    }
     // Inputs and Outputs must always have fixed IDs
-    pub fn input(i: usize) -> NodeId { NodeId(i) }
-    pub fn output(i: usize) -> NodeId { NodeId(i + 5_500) }
-    pub fn get_ordinal(&self) -> usize { self.0 }
+    pub fn input(i: usize) -> NodeId {
+        NodeId(i)
+    }
+    pub fn output(i: usize) -> NodeId {
+        NodeId(i + 5_500)
+    }
+    pub fn get_ordinal(&self) -> usize {
+        self.0
+    }
 }
 
 impl fmt::Display for NodeId {
@@ -28,7 +41,6 @@ impl fmt::Debug for NodeId {
     }
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Node {
     pub index: NodeIndex,
@@ -41,7 +53,7 @@ pub struct Node {
 
 impl Node {
     pub fn apply_activation_function(&self, input_sum: f32) -> f32 {
-        // NOTE: Traditional "bias" of a node is accomplished by having one of the input nodes 
+        // NOTE: Traditional "bias" of a node is accomplished by having one of the input nodes
         // always having a value of 1.0, thus the connection weight creates a bias.
         self.activation_function.apply(input_sum)
     }

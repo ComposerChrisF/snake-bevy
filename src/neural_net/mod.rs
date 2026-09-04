@@ -2,9 +2,9 @@
 #![allow(unused_variables)]
 
 mod activation_functions;
-mod layers;
-mod nodes;
 mod connections;
+mod layers;
 pub mod nets;
+mod nodes;
 pub mod populations;
 pub mod species;

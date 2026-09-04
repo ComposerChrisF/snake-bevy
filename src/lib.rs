@@ -1,15 +1,19 @@
+pub mod cmdline;
 #[cfg(feature = "dev")]
 mod dev_tools;
 mod game;
-mod screen;
-mod ui;
-mod snake_game;
 mod neural_net;
 pub mod nn_plays_snake;
-pub mod cmdline;
+mod screen;
+mod snake_game;
+mod ui;
 
 use bevy::{
-    asset::AssetMetaCheck, audio::{AudioPlugin, Volume}, prelude::*, render::camera::ScalingMode, window::WindowResolution
+    asset::AssetMetaCheck,
+    audio::{AudioPlugin, Volume},
+    prelude::*,
+    render::camera::ScalingMode,
+    window::WindowResolution,
 };
 
 // TODO: Base these off of the snake game size?
@@ -45,7 +49,8 @@ impl Plugin for AppPlugin {
                         canvas: Some("#bevy".to_string()),
                         fit_canvas_to_parent: true,
                         prevent_default_event_handling: true,
-                        resolution: WindowResolution::new(WINDOW_SIZE_X, WINDOW_SIZE_Y).with_scale_factor_override(1.0),
+                        resolution: WindowResolution::new(WINDOW_SIZE_X, WINDOW_SIZE_Y)
+                            .with_scale_factor_override(1.0),
                         ..default()
                     }
                     .into(),
@@ -87,7 +92,7 @@ fn spawn_camera(mut commands: Commands) {
     // Automatically change camera based on size of containing window:
     camera.projection.scaling_mode = ScalingMode::FixedVertical(WINDOW_SIZE_Y);
     camera.projection.area = Rect::new(0.0, 0.0, WINDOW_SIZE_X, WINDOW_SIZE_Y);
-    
+
     commands.spawn((
         Name::new("Camera"),
         camera,

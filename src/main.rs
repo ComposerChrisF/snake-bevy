@@ -8,7 +8,6 @@ use clap::Parser;
 use snake_bevy::nn_plays_snake::NnPlaysSnake;
 use snake_bevy::{cmdline::Args, AppPlugin};
 
-
 fn main() -> AppExit {
     let args = Args::parse();
     if args.sim {

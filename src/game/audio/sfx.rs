@@ -13,10 +13,10 @@ fn play_sfx(
     sfx_handles: Res<HandleMap<SfxKey>>,
 ) {
     let sfx_key = match trigger.event() {
-        PlaySfx::Key(SfxKey::Crash(0))   => SfxKey::Crash(  my_random( 4)),
-        PlaySfx::Key(SfxKey::Eating(0))  => SfxKey::Eating( my_random( 4)),
+        PlaySfx::Key(SfxKey::Crash(0)) => SfxKey::Crash(my_random(4)),
+        PlaySfx::Key(SfxKey::Eating(0)) => SfxKey::Eating(my_random(4)),
         PlaySfx::Key(SfxKey::Growing(0)) => SfxKey::Growing(my_random(11)),
-        PlaySfx::Key(SfxKey::Tick(0))    => SfxKey::Tick(   my_random(12)),
+        PlaySfx::Key(SfxKey::Tick(0)) => SfxKey::Tick(my_random(12)),
         PlaySfx::Key(key) => *key,
     };
     commands.spawn(AudioSourceBundle {

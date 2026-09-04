@@ -1,30 +1,32 @@
 // TODO: Move into separate crate!
 
-use std::{collections::VecDeque, fs, ops};
 use rand::Rng;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::{collections::VecDeque, fs, ops};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Grid {
     pub width: i16,
     pub height: i16,
-    pub cells: Vec::<Cell>,
+    pub cells: Vec<Cell>,
 }
 
 impl Grid {
-    pub const WIDTH:  i16 = 40;
+    pub const WIDTH: i16 = 40;
     pub const HEIGHT: i16 = 30;
     pub const _MAX_WIDTH_HEIGHT: i16 = 25; // Maximum of width & height, i.e. WIDTH.max(HEIGHT)
 
     #[allow(clippy::new_without_default)]
     pub fn new() -> Grid {
-        let mut new_grid = Grid { 
-            width: Self::WIDTH, 
-            height: Self::HEIGHT, 
+        let mut new_grid = Grid {
+            width: Self::WIDTH,
+            height: Self::HEIGHT,
             cells: Vec::<Cell>::with_capacity((Self::WIDTH * Self::HEIGHT) as usize),
         };
         for _ in 0..(Self::WIDTH * Self::HEIGHT) {
-            new_grid.cells.push(Cell { kind: CellKind::Empty });
+            new_grid.cells.push(Cell {
+                kind: CellKind::Empty,
+            });
         }
         new_grid.restart();
         new_grid
@@ -47,7 +49,9 @@ impl Grid {
         //TESTING: Self::set_cell(cells, 0, 0, CellKind::Crash);        // So we can see where origin is
     }
     fn set_cell(cells: &mut [Cell], x: i16, y: i16, kind: CellKind) {
-        if x < 0 || y < 0 || x >= Self::WIDTH || y >= Self::HEIGHT { return; }
+        if x < 0 || y < 0 || x >= Self::WIDTH || y >= Self::HEIGHT {
+            return;
+        }
         let i = y * Self::WIDTH + x;
         cells[i as usize] = Cell { kind };
     }
@@ -55,12 +59,16 @@ impl Grid {
         pt.x >= 0 && pt.y >= 0 && pt.x < Self::WIDTH && pt.y < Self::HEIGHT
     }
     pub fn get_cell(&self, pt: GridPoint) -> &Cell {
-        if !self.is_in_bounds(pt) { return &self.cells[0]; }
+        if !self.is_in_bounds(pt) {
+            return &self.cells[0];
+        }
         let i = pt.y * Self::WIDTH + pt.x;
         &self.cells[i as usize]
     }
     pub fn get_cell_mut(&mut self, pt: GridPoint) -> &mut Cell {
-        if !self.is_in_bounds(pt)  { return &mut self.cells[0]; }
+        if !self.is_in_bounds(pt) {
+            return &mut self.cells[0];
+        }
         let i = pt.y * Self::WIDTH + pt.x;
         &mut self.cells[i as usize]
     }
@@ -73,7 +81,9 @@ impl Grid {
     pub fn new_viable_apple_location(&self) -> GridPoint {
         for _ in 0..10000 {
             let loc = self.rand_point();
-            if self.get_cell(loc).kind != CellKind::Empty { continue; }
+            if self.get_cell(loc).kind != CellKind::Empty {
+                continue;
+            }
             return loc;
         }
         // TODO: In a good game, we might trigger this, so once snake is too long, we should
@@ -93,10 +103,9 @@ pub enum CellKind {
     Crash,
 }
 
-
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub struct Cell {
-    pub kind: CellKind
+    pub kind: CellKind,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
@@ -123,19 +132,19 @@ impl Direction {
     }
     pub fn to_point(self) -> GridPoint {
         match self {
-            Direction::North => GridPoint { x: 0, y: 1, },
-            Direction::East  => GridPoint { x: 1, y: 0, },
-            Direction::South => GridPoint { x: 0, y: -1, },
-            Direction::West  => GridPoint { x: -1, y: 0, },
+            Direction::North => GridPoint { x: 0, y: 1 },
+            Direction::East => GridPoint { x: 1, y: 0 },
+            Direction::South => GridPoint { x: 0, y: -1 },
+            Direction::West => GridPoint { x: -1, y: 0 },
         }
     }
 
     pub fn to_index(self) -> usize {
         match self {
             Direction::North => 0,
-            Direction::East  => 1,
+            Direction::East => 1,
             Direction::South => 2,
-            Direction::West  => 3,
+            Direction::West => 3,
         }
     }
 }
@@ -148,9 +157,7 @@ pub struct GridPoint {
 
 impl GridPoint {
     pub fn new(x: i16, y: i16) -> Self {
-        Self {
-            x, y
-        }
+        Self { x, y }
     }
     pub fn add(self, other: GridPoint) -> GridPoint {
         GridPoint {
@@ -158,7 +165,7 @@ impl GridPoint {
             y: self.y + other.y,
         }
     }
-    
+
     pub(crate) fn is_zero(&self) -> bool {
         self.x == 0 && self.y == 0
     }
@@ -166,18 +173,23 @@ impl GridPoint {
 
 impl ops::Add<Self> for GridPoint {
     type Output = Self;
-    fn add(self, rhs:Self) -> Self::Output {
-        GridPoint { x: self.x + rhs.x, y: self.y + rhs.y }
+    fn add(self, rhs: Self) -> Self::Output {
+        GridPoint {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
     }
 }
 
 impl ops::Sub<Self> for GridPoint {
     type Output = GridPoint;
-    fn sub(self, rhs:GridPoint) -> Self::Output {
-        GridPoint { x: self.x - rhs.x, y: self.y - rhs.y }
+    fn sub(self, rhs: GridPoint) -> Self::Output {
+        GridPoint {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
     }
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Snake {
@@ -186,15 +198,24 @@ pub struct Snake {
     pub to_grow: usize,
 }
 
-
 impl Snake {
     pub(self) fn new(grid: &mut Grid) -> Snake {
-        let locations = VecDeque::<GridPoint>::with_capacity(grid.width as usize * grid.height as usize);
-        let mut new_snake = Snake { head_location: GridPoint::default(), locations, to_grow: 0 };
+        let locations =
+            VecDeque::<GridPoint>::with_capacity(grid.width as usize * grid.height as usize);
+        let mut new_snake = Snake {
+            head_location: GridPoint::default(),
+            locations,
+            to_grow: 0,
+        };
         new_snake.restart(grid, None, None);
         new_snake
     }
-    pub(self) fn restart(&mut self, grid: &mut Grid, head_location: Option<GridPoint>, tail_location: Option<GridPoint>) {
+    pub(self) fn restart(
+        &mut self,
+        grid: &mut Grid,
+        head_location: Option<GridPoint>,
+        tail_location: Option<GridPoint>,
+    ) {
         self.locations.clear();
         self.to_grow = 0;
         if head_location.is_some() && tail_location.is_some() {
@@ -209,11 +230,15 @@ impl Snake {
         }
         for _ in 0..1000 {
             let tail = grid.rand_point();
-            if grid.get_cell(tail).kind != CellKind::Empty { continue; }
+            if grid.get_cell(tail).kind != CellKind::Empty {
+                continue;
+            }
             let dir = Direction::random();
             let offset = dir.to_point();
             let head = tail.add(offset);
-            if grid.get_cell(head).kind != CellKind::Empty { continue; }
+            if grid.get_cell(head).kind != CellKind::Empty {
+                continue;
+            }
             grid.get_cell_mut(head).kind = CellKind::Snake;
             grid.get_cell_mut(tail).kind = CellKind::Snake;
             self.locations.push_front(tail);
@@ -234,23 +259,19 @@ pub struct Apple {
     pub location: GridPoint,
 }
 
-
-
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum GameState {
     Running,
     GameOver,
 }
 
-
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum PlaybackEvents {
-    NewGame(GridPoint, GridPoint, GridPoint),  // Initialize grid (apple_pt, head_pt, tail_pt)
-    NewAppleLocation(GridPoint),    // Place apple
-    MoveSnake(Direction),           // Move snake
+    NewGame(GridPoint, GridPoint, GridPoint), // Initialize grid (apple_pt, head_pt, tail_pt)
+    NewAppleLocation(GridPoint),              // Place apple
+    MoveSnake(Direction),                     // Move snake
     GameOver,
 }
-
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Playback {
@@ -264,7 +285,6 @@ impl Playback {
         Some(serde_json::from_str::<Playback>(&data).unwrap())
     }
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SnakeGame {
@@ -285,7 +305,7 @@ impl SnakeGame {
     pub fn new() -> Self {
         let mut grid = Grid::new();
         let snake = Snake::new(&mut grid);
-        let apple = Apple { 
+        let apple = Apple {
             location: grid.new_viable_apple_location(),
         };
         let apple_cell = grid.get_cell_mut(apple.location);
@@ -296,32 +316,47 @@ impl SnakeGame {
             apple,
             apples_eaten: 0,
             state: GameState::Running,
-            playback: Playback { playback_events: Vec::with_capacity(256) },
+            playback: Playback {
+                playback_events: Vec::with_capacity(256),
+            },
             visited_vector: vec![false; Grid::WIDTH as usize * Grid::HEIGHT as usize],
             points_visited: 0,
         };
         new_game.playback.playback_events.clear();
-        new_game.playback.playback_events.push(PlaybackEvents::NewGame(
-            new_game.apple.location,
-            new_game.snake.head_location,
-            new_game.snake.locations[new_game.snake.locations.len() - 1]
-        ));
+        new_game
+            .playback
+            .playback_events
+            .push(PlaybackEvents::NewGame(
+                new_game.apple.location,
+                new_game.snake.head_location,
+                new_game.snake.locations[new_game.snake.locations.len() - 1],
+            ));
         new_game
     }
 
-    pub fn restart(&mut self, apple_location: Option<GridPoint>, head_location: Option<GridPoint>, tail_location: Option<GridPoint>) {
+    pub fn restart(
+        &mut self,
+        apple_location: Option<GridPoint>,
+        head_location: Option<GridPoint>,
+        tail_location: Option<GridPoint>,
+    ) {
         self.grid.restart();
-        self.snake.restart(&mut self.grid, head_location, tail_location);
-        self.apple.location = if let Some(apple) = apple_location { apple } else { self.grid.new_viable_apple_location() };
+        self.snake
+            .restart(&mut self.grid, head_location, tail_location);
+        self.apple.location = if let Some(apple) = apple_location {
+            apple
+        } else {
+            self.grid.new_viable_apple_location()
+        };
         let apple_cell = self.grid.get_cell_mut(self.apple.location);
         apple_cell.kind = CellKind::Apple;
         self.apples_eaten = 0;
         self.state = GameState::Running;
         self.playback.playback_events.clear();
         self.playback.playback_events.push(PlaybackEvents::NewGame(
-            self.apple.location, 
-            self.snake.head_location, 
-            self.snake.locations[self.snake.locations.len() - 1]
+            self.apple.location,
+            self.snake.head_location,
+            self.snake.locations[self.snake.locations.len() - 1],
         ));
         self.clear_visited();
         self.points_visited = 0;
@@ -334,23 +369,27 @@ impl SnakeGame {
     /// Move the snake, typically from user input.  For playback, `new_apple_location` allows
     /// provision of where the next apple tile is place.  For live play, `new_apple_location`
     /// sould be `None`, in which case a random location is chosen.
-    /// 
+    ///
     /// NOTE: Updating the visualization involves some logic (which might change in the future
     /// as game play changes):
-    /// 1. The following snake location tiles must be recomputed: 
+    /// 1. The following snake location tiles must be recomputed:
     ///     a. Head of the snake
     ///         i. Normally based on movement from previous tile...
     ///         ii. ...unless GameState is GameOver, then the head of the snake should be a crash.
     ///     b. the tile that previously had been the head of the snake
     ///     c. the tile that previously had been the tail becomes empty
     ///     d. the new tail (based on the movement to the next tile)
-    /// 2. If the apple moved, then 
+    /// 2. If the apple moved, then
     ///     a. the old apple location must either be empty or a snake
     ///     b. the new apple location is an apple.
     pub fn move_snake(&mut self, direction: Direction, new_apple_location: Option<GridPoint>) {
         //info!("move_snake({direction:#?}, {new_apple_location:#?}); snake.to_grow={}; GameState={:?}", self.snake.to_grow, self.state);
-        if self.state != GameState::Running { return; }
-        self.playback.playback_events.push(PlaybackEvents::MoveSnake(direction));
+        if self.state != GameState::Running {
+            return;
+        }
+        self.playback
+            .playback_events
+            .push(PlaybackEvents::MoveSnake(direction));
 
         let offset = direction.to_point();
         let new_head_location = self.snake.head_location.add(offset);
@@ -360,9 +399,14 @@ impl SnakeGame {
             // shortly push on a new head.
             let old_tail_location = self.snake.locations.pop_back().unwrap();
             let old_tail_cell = self.grid.get_cell_mut(old_tail_location);
-            // Moving tail first creates a problem for a length=2 snake where it would be valid 
+            // Moving tail first creates a problem for a length=2 snake where it would be valid
             // to reverse diretion, so we detect and disallow that here
-            old_tail_cell.kind = if new_head_location == old_tail_location && self.snake.length() <= 2 { CellKind::Crash } else { CellKind::Empty };
+            old_tail_cell.kind =
+                if new_head_location == old_tail_location && self.snake.length() <= 2 {
+                    CellKind::Crash
+                } else {
+                    CellKind::Empty
+                };
         } else {
             self.snake.to_grow -= 1;
         };
@@ -380,7 +424,9 @@ impl SnakeGame {
                 };
                 let new_apple_cell = self.grid.get_cell_mut(self.apple.location);
                 new_apple_cell.kind = CellKind::Apple;
-                self.playback.playback_events.push(PlaybackEvents::NewAppleLocation(self.apple.location));
+                self.playback
+                    .playback_events
+                    .push(PlaybackEvents::NewAppleLocation(self.apple.location));
                 self.snake.to_grow += Self::GROW_INCREMENT;
             }
             _ => {
@@ -396,17 +442,23 @@ impl SnakeGame {
 
         // Update visited info
         let i = new_head_location.y as usize * Grid::WIDTH as usize + new_head_location.x as usize;
-        if !self.visited_vector[i] { self.points_visited += 1; }
+        if !self.visited_vector[i] {
+            self.points_visited += 1;
+        }
         self.visited_vector[i] = true;
     }
-
 
     // FUTURE: For snake body, provide distance from tail? I.e. how long until snake vacates this tile?
     pub fn wall_and_body_distances(&self) -> ([i16; 4], [i16; 4]) {
         let mut dist_walls: [i16; 4] = [0; 4];
         let mut dist_snake: [i16; 4] = [0; 4];
         let head = self.snake.head_location;
-        for dir in [Direction::North, Direction::East, Direction::South, Direction::West] {
+        for dir in [
+            Direction::North,
+            Direction::East,
+            Direction::South,
+            Direction::West,
+        ] {
             let i = dir.to_index();
             dist_walls[i] = self.distance_to(head, dir, CellKind::Wall);
             dist_snake[i] = self.distance_to(head, dir, CellKind::Snake);

@@ -1,20 +1,31 @@
-
-use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
 use bevy::utils::hashbrown::{HashMap, HashSet};
 use log::{debug, trace};
-use rand::{thread_rng, Rng, prelude::SliceRandom};
+use rand::{prelude::SliceRandom, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
+use std::{
+    fmt,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
-use super::{activation_functions::ActivationFunction, connections::{Connection, ConnectionId}, layers::Layer, nodes::{Node, NodeId}, populations::FitnessInfo, species::SpeciesIndex};
+use super::{
+    activation_functions::ActivationFunction,
+    connections::{Connection, ConnectionId},
+    layers::Layer,
+    nodes::{Node, NodeId},
+    populations::FitnessInfo,
+    species::SpeciesIndex,
+};
 
-fn is_none_or<T, U>(val: Option<T>, f: U) -> bool 
-    where T: Sized, U: FnOnce(T) -> bool {
+fn is_none_or<T, U>(val: Option<T>, f: U) -> bool
+where
+    T: Sized,
+    U: FnOnce(T) -> bool,
+{
     match val {
         None => true,
         Some(v) => f(v),
     }
 }
-
 
 static NET_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
@@ -40,8 +51,6 @@ impl fmt::Debug for NetId {
     }
 }
 
-
-
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeIndex(NetId, usize);
 
@@ -55,7 +64,6 @@ impl fmt::Debug for NodeIndex {
         write!(f, "NodeIndex({},{})", self.0, self.1)
     }
 }
-
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionIndex(NetId, usize);
@@ -71,17 +79,14 @@ impl fmt::Debug for ConnectionIndex {
     }
 }
 
-
-
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NetParams {
     pub input_count: usize,
     #[serde(skip_serializing, skip_deserializing)]
-    pub input_names: Option<&'static[&'static str]>,
+    pub input_names: Option<&'static [&'static str]>,
     pub output_count: usize,
     #[serde(skip_serializing, skip_deserializing)]
-    pub output_names: Option<&'static[&'static str]>,
+    pub output_names: Option<&'static [&'static str]>,
 }
 
 impl NetParams {
@@ -94,7 +99,6 @@ impl NetParams {
         }
     }
 }
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MutationParams {
@@ -111,10 +115,11 @@ pub struct MutationParams {
     pub prob_add_node: f64,
 }
 
-
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Net<Fit> where Fit: FitnessInfo {
+pub struct Net<Fit>
+where
+    Fit: FitnessInfo,
+{
     pub id: NetId,
     pub net_params: NetParams,
     pub(crate) nodes: Vec<Node>,
@@ -123,16 +128,19 @@ pub struct Net<Fit> where Fit: FitnessInfo {
     pub(crate) connections: Vec<Connection>,
     #[serde(skip_serializing, skip_deserializing)]
     map_connection_id_to_index: HashMap<ConnectionId, ConnectionIndex>,
-    pub fitness_info: Fit,      // TODO: Split out sw_fitness into direct member of Net, since user of library shouldn't need to manage that field at all!
+    pub fitness_info: Fit, // TODO: Split out sw_fitness into direct member of Net, since user of library shouldn't need to manage that field at all!
     #[serde(skip_serializing, skip_deserializing)]
     pub is_evaluation_order_up_to_date: bool,
     #[serde(skip_serializing, skip_deserializing)]
     node_order_list: Vec<NodeIndex>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub species_index: Option<SpeciesIndex>,    // TODO: This should not be Option<>!!, species should always be available!
+    pub species_index: Option<SpeciesIndex>, // TODO: This should not be Option<>!!, species should always be available!
 }
 
-impl <Fit> Net<Fit> where Fit: FitnessInfo {
+impl<Fit> Net<Fit>
+where
+    Fit: FitnessInfo,
+{
     pub fn get_node(&self, i: NodeIndex) -> &Node {
         assert_eq!(i.0, self.id);
         &self.nodes[i.1]
@@ -150,7 +158,13 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         &mut self.connections[i.1]
     }
 
-    fn add_node(&mut self, id: Option<NodeId>, activation_function: ActivationFunction, layer: Option<Layer>, value: f32) -> NodeIndex {
+    fn add_node(
+        &mut self,
+        id: Option<NodeId>,
+        activation_function: ActivationFunction,
+        layer: Option<Layer>,
+        value: f32,
+    ) -> NodeIndex {
         let index = NodeIndex(self.id, self.nodes.len());
         let node = Node {
             index,
@@ -160,16 +174,29 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             input_connections: Vec::new(),
             value,
         };
-        if id.is_some() { assert!(id.unwrap() == node.id);}
-        if node.layer == Layer::Input { assert!(node.id.get_ordinal() < 30); }
+        if id.is_some() {
+            assert!(id.unwrap() == node.id);
+        }
+        if node.layer == Layer::Input {
+            assert!(node.id.get_ordinal() < 30);
+        }
         self.map_node_id_to_index.insert(node.id, node.index);
         self.nodes.push(node);
         index
     }
 
-    fn add_connection(&mut self, id: Option<ConnectionId>, weight: f32, is_enabled: bool, input_node: NodeIndex, output_node: NodeIndex) -> ConnectionIndex {
-        assert_eq!(self.id,  input_node.0);     assert!( input_node.1 < self.nodes.len());
-        assert_eq!(self.id, output_node.0);     assert!(output_node.1 < self.nodes.len());
+    fn add_connection(
+        &mut self,
+        id: Option<ConnectionId>,
+        weight: f32,
+        is_enabled: bool,
+        input_node: NodeIndex,
+        output_node: NodeIndex,
+    ) -> ConnectionIndex {
+        assert_eq!(self.id, input_node.0);
+        assert!(input_node.1 < self.nodes.len());
+        assert_eq!(self.id, output_node.0);
+        assert!(output_node.1 < self.nodes.len());
         let index = ConnectionIndex(self.id, self.connections.len());
         let connection = Connection {
             index,
@@ -180,7 +207,8 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             output_node,
         };
         let connection_index = connection.index;
-        self.map_connection_id_to_index.insert(connection.id, connection.index);
+        self.map_connection_id_to_index
+            .insert(connection.id, connection.index);
         self.connections.push(connection);
         let node_to_upate = &mut self.nodes[output_node.1];
         node_to_upate.input_connections.push(connection_index);
@@ -203,13 +231,23 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         };
 
         // NOTE: We add them specifically in this order, so that we can
-        // rely on 0..input_count being the inputs, and 
+        // rely on 0..input_count being the inputs, and
         // input_count..(input_count+output_count) being the outputs!!!
-        for i in 0..net.net_params.input_count { 
-            net.add_node(Some(NodeId::input(i)), ActivationFunction::None, Some(Layer::Input), 0.0);
+        for i in 0..net.net_params.input_count {
+            net.add_node(
+                Some(NodeId::input(i)),
+                ActivationFunction::None,
+                Some(Layer::Input),
+                0.0,
+            );
         }
         for i in 0..net.net_params.output_count {
-            net.add_node(Some(NodeId::output(i)), ActivationFunction::ModSigmoid, Some(Layer::Output), 0.0);
+            net.add_node(
+                Some(NodeId::output(i)),
+                ActivationFunction::ModSigmoid,
+                Some(Layer::Output),
+                0.0,
+            );
         }
         net
     }
@@ -218,7 +256,9 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
     // needs to be evaluated in!  Then, to evaluate, we simply linearly replay the eval list--no
     // recursion or "node_has_been_evaluated" logic needed!
     fn build_evaluation_order(&mut self) {
-        if self.is_evaluation_order_up_to_date { return; }
+        if self.is_evaluation_order_up_to_date {
+            return;
+        }
         let mut node_has_been_evaluated = vec![false; self.nodes.len()];
         let mut node_order_list = Vec::<NodeIndex>::with_capacity(self.nodes.len());
         let mut layer_list = HashMap::<NodeIndex, u16>::with_capacity(self.nodes.len());
@@ -231,8 +271,19 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         }
 
         // Figure out the order to compute nodes and what layer the nodes belong to.
-        for node_index in self.nodes.iter().filter_map(|n| if n.layer == Layer::Output { Some(n.index) } else { None }) {
-            self.build_evaluation_order_recurse(0, &mut node_order_list, &mut node_has_been_evaluated, node_index);
+        for node_index in self.nodes.iter().filter_map(|n| {
+            if n.layer == Layer::Output {
+                Some(n.index)
+            } else {
+                None
+            }
+        }) {
+            self.build_evaluation_order_recurse(
+                0,
+                &mut node_order_list,
+                &mut node_has_been_evaluated,
+                node_index,
+            );
             self.build_layer_order_recurse(0, &mut layer_list, node_index);
         }
 
@@ -244,15 +295,21 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             match node.layer {
                 Layer::Input => assert!(is_none_or(layer, |&layer| layer == 0)),
                 Layer::Output => {
-                    debug!("assert: layer={layer:?}, conn_count={}", node.input_connections.len());
-                    assert!(is_none_or(layer, |&layer| layer > 0 || node.input_connections.is_empty()));
-                },
-                _ => node.layer = if let Some(&layer) = layer {
-                    //assert!(layer > 0);       // TODO: Re-enable?
-                    Layer::Hidden(layer)
-                } else {
-                    Layer::Unreachable
-                },
+                    debug!(
+                        "assert: layer={layer:?}, conn_count={}",
+                        node.input_connections.len()
+                    );
+                    assert!(is_none_or(layer, |&layer| layer > 0
+                        || node.input_connections.is_empty()));
+                }
+                _ => {
+                    node.layer = if let Some(&layer) = layer {
+                        //assert!(layer > 0);       // TODO: Re-enable?
+                        Layer::Hidden(layer)
+                    } else {
+                        Layer::Unreachable
+                    }
+                }
             }
         }
         drop(layer_list);
@@ -261,11 +318,17 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         self.is_evaluation_order_up_to_date = true;
     }
 
-    // We figure out the order to compute all output nodes by recursively seeking the values 
-    // of all required inputs for each output node.  Note that the last output_count nodes 
+    // We figure out the order to compute all output nodes by recursively seeking the values
+    // of all required inputs for each output node.  Note that the last output_count nodes
     // are the output nodes, so we only have to evalute them.  Thus, we might skip computation
     // of nodes that don't (eventually) connect to any output.
-    fn build_evaluation_order_recurse(&self, recursion: usize, node_order_list: &mut Vec<NodeIndex>, node_has_been_evaluated: &mut [bool], node_index: NodeIndex) {
+    fn build_evaluation_order_recurse(
+        &self,
+        recursion: usize,
+        node_order_list: &mut Vec<NodeIndex>,
+        node_has_been_evaluated: &mut [bool],
+        node_index: NodeIndex,
+    ) {
         if recursion > 2 * node_has_been_evaluated.len() {
             debug!("build_evaluation_order_recurse({recursion}, {node_order_list:?}, {node_has_been_evaluated:?}, {node_index}) for");
             debug!("{self:#?}");
@@ -273,20 +336,34 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             panic!()
         }
         assert_eq!(self.id, node_index.0);
-        if node_has_been_evaluated[node_index.1] { return; /* No work to do! Already evaluated! */ }
+        if node_has_been_evaluated[node_index.1] {
+            return; /* No work to do! Already evaluated! */
+        }
         for &connection_index in self.get_node(node_index).input_connections.iter() {
             let connection = &self.connections[connection_index.1];
             assert_eq!(node_index, connection.output_node);
-            if !connection.is_enabled { continue; }     // Treat disabled connections as not being connected (i.e. do this check here rather than in evaluate()!)
+            if !connection.is_enabled {
+                continue;
+            } // Treat disabled connections as not being connected (i.e. do this check here rather than in evaluate()!)
             if !node_has_been_evaluated[connection.input_node.1] {
-                self.build_evaluation_order_recurse(recursion + 1, node_order_list, node_has_been_evaluated, connection.input_node);
+                self.build_evaluation_order_recurse(
+                    recursion + 1,
+                    node_order_list,
+                    node_has_been_evaluated,
+                    connection.input_node,
+                );
             }
         }
         node_order_list.push(node_index);
         node_has_been_evaluated[node_index.1] = true;
     }
 
-    fn build_layer_order_recurse(&self, recursion: usize, layer_list: &mut HashMap<NodeIndex, u16>, node_index: NodeIndex) -> u16 {
+    fn build_layer_order_recurse(
+        &self,
+        recursion: usize,
+        layer_list: &mut HashMap<NodeIndex, u16>,
+        node_index: NodeIndex,
+    ) -> u16 {
         if recursion > 2 * self.nodes.len() {
             debug!("build_layer_order_recurse({recursion}, {layer_list:?}, {node_index}) for");
             debug!("{self:#?}");
@@ -294,33 +371,44 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             panic!()
         }
 
-        if layer_list.contains_key(&node_index) { return layer_list[&node_index]; /* No work to do! Already computed! */ }
+        if layer_list.contains_key(&node_index) {
+            return layer_list[&node_index]; /* No work to do! Already computed! */
+        }
         let mut layer = 0;
         for connection_index in self.get_node(node_index).input_connections.iter() {
             let connection = &self.connections[connection_index.1];
             assert_eq!(node_index, connection.output_node);
-            layer = layer.max(1 + self.build_layer_order_recurse(recursion + 1, layer_list, connection.input_node));
+            layer = layer.max(
+                1 + self.build_layer_order_recurse(
+                    recursion + 1,
+                    layer_list,
+                    connection.input_node,
+                ),
+            );
         }
         layer_list.insert(node_index, layer);
         layer
     }
-
 
     pub fn evaluate(&mut self) {
         assert!(self.is_evaluation_order_up_to_date);
         //assert!(self.node_values.len() > self.nodes.len());
 
         // We have already computed a correct order in which to evaluate nodes, and the caller
-        // has filled in the self.node_values for all input nodes, so we now visit nodes in 
+        // has filled in the self.node_values for all input nodes, so we now visit nodes in
         // order and evaluate them.
         for &node_index in self.node_order_list.iter() {
-            let inputs_sum = self.get_node(node_index).input_connections.iter()
+            let inputs_sum = self
+                .get_node(node_index)
+                .input_connections
+                .iter()
                 .map(|connection_index| {
                     let connection = &self.connections[connection_index.1];
                     self.get_node(connection.input_node).value * connection.weight
                 })
                 .sum();
-            { // Scope for mutable node
+            {
+                // Scope for mutable node
                 let node = &mut self.nodes[node_index.1];
                 node.value = node.apply_activation_function(inputs_sum);
             }
@@ -330,12 +418,27 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
     fn adjust_prob(p: f64, adjuster: f64) -> f64 {
         f64::min(1.0, p * adjuster)
     }
-    
-    pub(super) fn cross_into_new_net(&self, other: &Self, mut_params: &MutationParams, mutation_multiplier: f64, parent_species_population_size: f32) -> Self {
+
+    pub(super) fn cross_into_new_net(
+        &self,
+        other: &Self,
+        mut_params: &MutationParams,
+        mutation_multiplier: f64,
+        parent_species_population_size: f32,
+    ) -> Self {
         // Choose a "winning" parent, partially based on fitnesses
-        let (winner, loser) = if self.fitness_info.get_fitness() >= other.fitness_info.get_fitness() { (self, other) } else { (other, self) };
+        let (winner, loser) = if self.fitness_info.get_fitness() >= other.fitness_info.get_fitness()
+        {
+            (self, other)
+        } else {
+            (other, self)
+        };
         // Small chance to actually choose the "loser" as the winner:
-        let (winner, loser) = if thread_rng().gen_bool(0.2) { (loser, winner) } else { (winner, loser) };
+        let (winner, loser) = if thread_rng().gen_bool(0.2) {
+            (loser, winner)
+        } else {
+            (winner, loser)
+        };
 
         // Initialize the child Net
         let max_node_count = self.nodes.len().max(other.nodes.len());
@@ -353,11 +456,23 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             species_index: None,
         };
 
-
         // Remove a node by selecting one NOT to copy!
         let mut node_id_dont_copy: Option<NodeId> = None;
-        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_remove_node, mutation_multiplier)) {
-            let hidden = winner.nodes.iter().filter_map(|n| if let Layer::Hidden(_) = n.layer { Some(n.id) } else { None }).collect::<Vec<_>>();
+        if thread_rng().gen_bool(Self::adjust_prob(
+            mut_params.prob_remove_node,
+            mutation_multiplier,
+        )) {
+            let hidden = winner
+                .nodes
+                .iter()
+                .filter_map(|n| {
+                    if let Layer::Hidden(_) = n.layer {
+                        Some(n.id)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
             if let Some(&x) = hidden.choose(&mut thread_rng()) {
                 node_id_dont_copy = Some(x);
             }
@@ -365,53 +480,71 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
 
         // Remove a connection by selecting one NOT to copy!
         let mut connection_id_dont_copy: Option<ConnectionId> = None;
-        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_remove_connection, mutation_multiplier)) {
+        if thread_rng().gen_bool(Self::adjust_prob(
+            mut_params.prob_remove_connection,
+            mutation_multiplier,
+        )) {
             if let Some(x) = winner.connections.choose(&mut thread_rng()) {
                 connection_id_dont_copy = Some(x.id);
             }
         }
 
-
         // Copy the common nodes randomly from either parent.  Also, copy the disjoint nodes only from the winner.
         for node_winner in winner.nodes.iter() {
-            if node_id_dont_copy.is_some_and(|id| id == node_winner.id) { 
-                trace!("Skipping node copy of {}", node_winner.index); 
-                continue; 
+            if node_id_dont_copy.is_some_and(|id| id == node_winner.id) {
+                trace!("Skipping node copy of {}", node_winner.index);
+                continue;
             }
             let node_to_clone = match loser.map_node_id_to_index.get(&node_winner.id) {
                 None => node_winner,
-                Some(&node_index_loser) => if thread_rng().gen_bool(0.5) { node_winner } else { loser.get_node(node_index_loser) },
+                Some(&node_index_loser) => {
+                    if thread_rng().gen_bool(0.5) {
+                        node_winner
+                    } else {
+                        loser.get_node(node_index_loser)
+                    }
+                }
             };
-            net_child.add_node(Some(node_to_clone.id), node_to_clone.activation_function, Some(node_to_clone.layer), node_to_clone.value);
+            net_child.add_node(
+                Some(node_to_clone.id),
+                node_to_clone.activation_function,
+                Some(node_to_clone.layer),
+                node_to_clone.value,
+            );
         }
 
         // Copy the common connections randomly from either parent, BUT always set the is_enabled to the value
         // from the winner.  Also, copy the disjoint connections only from the winner.
         for connection_winner in winner.connections.iter() {
             if connection_id_dont_copy.is_some_and(|id| id == connection_winner.id) {
-                trace!("Skipping connection copy of {connection_winner:#?}"); 
-                continue; 
+                trace!("Skipping connection copy of {connection_winner:#?}");
+                continue;
             }
-            if node_id_dont_copy.is_some_and(|id| id == winner.get_node(connection_winner. input_node).id 
-                                               || id == winner.get_node(connection_winner.output_node).id) { 
-                trace!("Skipping copy of connection due to skipping node; connection = {connection_winner:#?}"); 
-                continue; 
+            if node_id_dont_copy.is_some_and(|id| {
+                id == winner.get_node(connection_winner.input_node).id
+                    || id == winner.get_node(connection_winner.output_node).id
+            }) {
+                trace!("Skipping copy of connection due to skipping node; connection = {connection_winner:#?}");
+                continue;
             }
-            let (net_of_clone, connection_to_clone) = match loser.map_connection_id_to_index.get(&connection_winner.id) {
-                None => (winner, connection_winner),
-                Some(connection_index_loser) => if thread_rng().gen_bool(0.5) { 
-                    (winner, connection_winner)
-                } else { 
-                    (loser, &loser.connections[connection_index_loser.1])
-                },
-            };
-            let input_node_id =  net_of_clone.get_node(connection_to_clone. input_node).id;
+            let (net_of_clone, connection_to_clone) =
+                match loser.map_connection_id_to_index.get(&connection_winner.id) {
+                    None => (winner, connection_winner),
+                    Some(connection_index_loser) => {
+                        if thread_rng().gen_bool(0.5) {
+                            (winner, connection_winner)
+                        } else {
+                            (loser, &loser.connections[connection_index_loser.1])
+                        }
+                    }
+                };
+            let input_node_id = net_of_clone.get_node(connection_to_clone.input_node).id;
             let output_node_id = net_of_clone.get_node(connection_to_clone.output_node).id;
             net_child.add_connection(
-                Some(connection_to_clone.id), 
-                connection_to_clone.weight, 
-                connection_to_clone.is_enabled, 
-                *net_child.map_node_id_to_index.get(& input_node_id).unwrap(),
+                Some(connection_to_clone.id),
+                connection_to_clone.weight,
+                connection_to_clone.is_enabled,
+                *net_child.map_node_id_to_index.get(&input_node_id).unwrap(),
                 *net_child.map_node_id_to_index.get(&output_node_id).unwrap(),
             );
         }
@@ -423,46 +556,83 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         net_child.verify_invariants();
 
         trace!("NET: {net_child:#?}");
-        net_child.mutate_self(mut_params, mutation_multiplier, parent_species_population_size);
+        net_child.mutate_self(
+            mut_params,
+            mutation_multiplier,
+            parent_species_population_size,
+        );
         net_child
     }
 
-    fn verify_invariants(&self) { 
+    fn verify_invariants(&self) {
         trace!("NET: {:#?}", self);
         //self.print_net_structure();
 
-        let       node_count = self.nodes      .len();
+        let node_count = self.nodes.len();
         let connection_count = self.connections.len();
 
         // NOTE: Must keep struct invariants intact:
 
         // 1. All node indexes are from this net and correctly map to the same item
-        assert!(self.      nodes.iter().enumerate().all(|(i, item)| item.index.0 == self.id && item.index.1 == i));
-        assert!(self.connections.iter().enumerate().all(|(i, item)| item.index.0 == self.id && item.index.1 == i));
+        assert!(self
+            .nodes
+            .iter()
+            .enumerate()
+            .all(|(i, item)| item.index.0 == self.id && item.index.1 == i));
+        assert!(self
+            .connections
+            .iter()
+            .enumerate()
+            .all(|(i, item)| item.index.0 == self.id && item.index.1 == i));
 
         // 2. All items are in their respective HashMaps and their indexes are correct
-        assert!(self.map_node_id_to_index      .len() == self.nodes      .len());
+        assert!(self.map_node_id_to_index.len() == self.nodes.len());
         assert!(self.map_connection_id_to_index.len() == self.connections.len());
-        assert!(self.map_node_id_to_index      .iter().all(|(&id, &index)| index.0 == self.id && self.      nodes[index.1].id == id));
-        assert!(self.map_connection_id_to_index.iter().all(|(&id, &index)| index.0 == self.id && self.connections[index.1].id == id));
-        assert!(self.      nodes.iter().all(|item| item.index == self.map_node_id_to_index      [&item.id]));
-        assert!(self.connections.iter().all(|item| item.index == self.map_connection_id_to_index[&item.id]));
+        assert!(self
+            .map_node_id_to_index
+            .iter()
+            .all(|(&id, &index)| index.0 == self.id && self.nodes[index.1].id == id));
+        assert!(self
+            .map_connection_id_to_index
+            .iter()
+            .all(|(&id, &index)| index.0 == self.id && self.connections[index.1].id == id));
+        assert!(self
+            .nodes
+            .iter()
+            .all(|item| item.index == self.map_node_id_to_index[&item.id]));
+        assert!(self
+            .connections
+            .iter()
+            .all(|item| item.index == self.map_connection_id_to_index[&item.id]));
 
         // 3a. All node_indexes in Connection::input_node, and Connection::output_node must
         // refer to valid nodes from the same Net
-        assert!(self.connections.iter().all(|c| c. input_node.0 == self.id && c. input_node.1 < self.nodes.len()));
-        assert!(self.connections.iter().all(|c| c.output_node.0 == self.id && c.output_node.1 < self.nodes.len()));
+        assert!(self
+            .connections
+            .iter()
+            .all(|c| c.input_node.0 == self.id && c.input_node.1 < self.nodes.len()));
+        assert!(self
+            .connections
+            .iter()
+            .all(|c| c.output_node.0 == self.id && c.output_node.1 < self.nodes.len()));
         // 3b. And all Node::input_connections refer to ConnectionIds from the same Net
-        assert!(self.nodes.iter().all(|n| 
-            n.input_connections.iter().all(|index| index.0 == self.id && index.1 < self.connections.len())));
+        assert!(self.nodes.iter().all(|n| n
+            .input_connections
+            .iter()
+            .all(|index| index.0 == self.id && index.1 < self.connections.len())));
         // 3c. All Node::input_connections are unique (no duplicates).  We do this by collecting
         // a HashSet of ConnectionIndexes and if the len() matches the original, there were no duplicates.
         assert!(self.nodes.iter().all(|n| {
-            n.input_connections.iter().copied().collect::<HashSet<ConnectionIndex>>().len() == n.input_connections.len()
+            n.input_connections
+                .iter()
+                .copied()
+                .collect::<HashSet<ConnectionIndex>>()
+                .len()
+                == n.input_connections.len()
         }));
 
         // 4. Nodes are in proper layers
-        assert!(!self.is_evaluation_order_up_to_date || self.nodes.iter().all(|n| 
+        assert!(!self.is_evaluation_order_up_to_date || self.nodes.iter().all(|n|
             n.input_connections.iter().all(|&c_index| {
                 let connection = self.get_connection(c_index);
                 let input_node = self.get_node(connection.input_node);
@@ -476,43 +646,81 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         ));
 
         // 5. Each connection is from a lower-numbered layer to a higher-numbered layer
-        assert!(!self.is_evaluation_order_up_to_date || self.connections.iter().all(|c| {
-            let input_node  = self.get_node(c. input_node);
-            let output_node = self.get_node(c.output_node);
-            // input_node must come before output_node, unless one of
-            // them is Unreachable, in which case None was returned, and we can't really check them out.
-            input_node.layer.comes_before(output_node.layer).unwrap_or(true)
-        }));
+        assert!(
+            !self.is_evaluation_order_up_to_date
+                || self.connections.iter().all(|c| {
+                    let input_node = self.get_node(c.input_node);
+                    let output_node = self.get_node(c.output_node);
+                    // input_node must come before output_node, unless one of
+                    // them is Unreachable, in which case None was returned, and we can't really check them out.
+                    input_node
+                        .layer
+                        .comes_before(output_node.layer)
+                        .unwrap_or(true)
+                })
+        );
 
         // 6. Check for cycles
         // TODO: Not sure of an easy way to do this!
     }
 
-    fn choose_index<T:Copy>(id_list: &[T]) -> T {
+    fn choose_index<T: Copy>(id_list: &[T]) -> T {
         let i = thread_rng().gen_range(0..id_list.len());
         id_list[i]
     }
 
-    fn choose_index_not<T:Copy+PartialEq>(id_list: &[T], not: T) -> T {
+    fn choose_index_not<T: Copy + PartialEq>(id_list: &[T], not: T) -> T {
         for _ in 0..20 {
             let i = thread_rng().gen_range(0..id_list.len());
             let id = id_list[i];
-            if id != not { return id; }
+            if id != not {
+                return id;
+            }
         }
         panic!("Unable to find item: choose_id_cond()")
     }
 
-
-    pub(super) fn mutate_self(&mut self, mut_params: &MutationParams, mutation_multiplier: f64, parent_species_population_size: f32) {
-        let node_index_list   = self.nodes.iter().map(|n| n.index).collect::<Vec<_>>();
-        let input_and_hidden  = self.nodes.iter().filter_map(|n| if n.layer != Layer::Output && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
-        let hidden_and_output = self.nodes.iter().filter_map(|n| if n.layer != Layer::Input  && n.layer != Layer::Unreachable { Some(n.index) } else { None }).collect::<Vec<_>>();
+    pub(super) fn mutate_self(
+        &mut self,
+        mut_params: &MutationParams,
+        mutation_multiplier: f64,
+        parent_species_population_size: f32,
+    ) {
+        let node_index_list = self.nodes.iter().map(|n| n.index).collect::<Vec<_>>();
+        let input_and_hidden = self
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                if n.layer != Layer::Output && n.layer != Layer::Unreachable {
+                    Some(n.index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let hidden_and_output = self
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                if n.layer != Layer::Input && n.layer != Layer::Unreachable {
+                    Some(n.index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         // Change a single node's activation function
-        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_mutate_activation_function_of_node, mutation_multiplier)) && !node_index_list.is_empty() {
+        if thread_rng().gen_bool(Self::adjust_prob(
+            mut_params.prob_mutate_activation_function_of_node,
+            mutation_multiplier,
+        )) && !node_index_list.is_empty()
+        {
             trace!("Mutating node activation function");
             let node_mutate = self.get_node_mut(Self::choose_index(&node_index_list));
-            if node_mutate.layer != Layer::Input { node_mutate.activation_function = ActivationFunction::choose_random(); }
+            if node_mutate.layer != Layer::Input {
+                node_mutate.activation_function = ActivationFunction::choose_random();
+            }
         }
 
         // Change all connections' weight
@@ -521,8 +729,14 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
                 connection_mutate.weight = thread_rng().gen::<f32>() * 2.0 - 1.0;
             } else {
                 // 0>=max_weight_change_frac>1.0 i.e. w *= (1.0 - rand_between(0.0, max_weight_change_frac)).pow(+/-1.0)
-                let pow = if thread_rng().gen_bool(0.5) { 1.0 } else { -1.0 };
-                connection_mutate.weight *= (1.0 - (thread_rng().gen::<f32>() * mut_params.max_weight_change_frac)).powf(pow);
+                let pow = if thread_rng().gen_bool(0.5) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                connection_mutate.weight *= (1.0
+                    - (thread_rng().gen::<f32>() * mut_params.max_weight_change_frac))
+                    .powf(pow);
             }
         }
         //// Change a single connection weight
@@ -541,24 +755,37 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
 
         // Toggle a conneciton's is_enabled
         let connection_index_list = self.connections.iter().map(|c| c.index).collect::<Vec<_>>();
-        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_toggle_enabled, mutation_multiplier)) && !connection_index_list.is_empty() {
+        if thread_rng().gen_bool(Self::adjust_prob(
+            mut_params.prob_toggle_enabled,
+            mutation_multiplier,
+        )) && !connection_index_list.is_empty()
+        {
             trace!("Mutating connection is_enabled");
-            let connection_mutate = self.get_connection_mut(Self::choose_index(&connection_index_list));
+            let connection_mutate =
+                self.get_connection_mut(Self::choose_index(&connection_index_list));
             connection_mutate.is_enabled = !connection_mutate.is_enabled;
         }
 
         // Add a connection
         // TODO: Track node connections and re-use connection id if connection is same! (pg 108, section 3.2 para #3)
-        let prob_add_connection = if parent_species_population_size < 100.0 { mut_params.prob_add_connection } else { mut_params.prob_add_connection_large_pop };
-        if thread_rng().gen_bool(Self::adjust_prob(prob_add_connection, mutation_multiplier)) && input_and_hidden.len() > 1 {
+        let prob_add_connection = if parent_species_population_size < 100.0 {
+            mut_params.prob_add_connection
+        } else {
+            mut_params.prob_add_connection_large_pop
+        };
+        if thread_rng().gen_bool(Self::adjust_prob(prob_add_connection, mutation_multiplier))
+            && input_and_hidden.len() > 1
+        {
             let mut index_from = Self::choose_index(&input_and_hidden);
-            let mut index_to   = Self::choose_index_not(&hidden_and_output, index_from);
+            let mut index_to = Self::choose_index_not(&hidden_and_output, index_from);
             let from = self.get_node(index_from);
-            let to   = self.get_node(index_to  );
+            let to = self.get_node(index_to);
             // If we chose a "from" that comes before a "to", simply swap them
             if let Layer::Hidden(l_from) = from.layer {
-                if let Layer::Hidden(l_to) = to.layer { 
-                    if l_from > l_to { std::mem::swap(&mut index_from, &mut index_to); }
+                if let Layer::Hidden(l_to) = to.layer {
+                    if l_from > l_to {
+                        std::mem::swap(&mut index_from, &mut index_to);
+                    }
                 }
             }
 
@@ -566,24 +793,23 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             // hidden layer.
             assert!({
                 let l_from = self.get_node(index_from).layer;
-                let l_to   = self.get_node(index_to).layer;
+                let l_to = self.get_node(index_to).layer;
                 let comes_before = l_from.comes_before(l_to);
                 if comes_before.is_none() {
                     trace!("l_from={l_from}, l_to={l_to}");
                 }
-                comes_before.unwrap() || (
-                    match (l_from, l_to) {
+                comes_before.unwrap()
+                    || (match (l_from, l_to) {
                         (Layer::Hidden(i), Layer::Hidden(j)) => i == j,
                         _ => false,
-                    }
-                )
+                    })
             });
             let connection_index_new = self.add_connection(
-                None, 
-                thread_rng().gen::<f32>() * 2.0 - 1.0, 
-                true, 
-                index_from, 
-                index_to
+                None,
+                thread_rng().gen::<f32>() * 2.0 - 1.0,
+                true,
+                index_from,
+                index_to,
             );
             let connnection_new = self.get_connection(connection_index_new);
             trace!("Mutating by adding connection {connection_index_new} from={index_from} on layer {}, to={index_to} on layer {}", self.get_node(index_from).layer, self.get_node(index_to).layer);
@@ -593,22 +819,43 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         // made a new connection between two nodes in the same hidden layer
 
         // Add node
-        if thread_rng().gen_bool(Self::adjust_prob(mut_params.prob_add_node, mutation_multiplier)) && !connection_index_list.is_empty() {
-            // Choose a random Connection, and split it into two, inserting the new node inbetween 
+        if thread_rng().gen_bool(Self::adjust_prob(
+            mut_params.prob_add_node,
+            mutation_multiplier,
+        )) && !connection_index_list.is_empty()
+        {
+            // Choose a random Connection, and split it into two, inserting the new node inbetween
             // and setting old.is_enabled = false
             let connection_index_old = Self::choose_index(&connection_index_list);
             let connection_old = self.get_connection_mut(connection_index_old);
             connection_old.is_enabled = false;
             let weight_connection_new_b = connection_old.weight;
-            let node_index_input  = connection_old. input_node;
+            let node_index_input = connection_old.input_node;
             let node_index_output = connection_old.output_node;
             let node_output = self.get_node(node_index_output);
             let activation_function = node_output.activation_function;
 
             let node_index_new = self.add_node(None, activation_function, None, 0.0);
-            let connection_index_new_a = self.add_connection(None, activation_function.get_neutral_value(), true, /*from*/ node_index_input, /*to*/ node_index_new   );
-            let connection_index_new_b = self.add_connection(None, weight_connection_new_b,                 true, /*from*/ node_index_new,   /*to*/ node_index_output);
-            trace!("Mutating by adding node {} and connections {} and {}", node_index_new, connection_index_new_a, connection_index_new_b);
+            let connection_index_new_a = self.add_connection(
+                None,
+                activation_function.get_neutral_value(),
+                true,
+                /*from*/ node_index_input,
+                /*to*/ node_index_new,
+            );
+            let connection_index_new_b = self.add_connection(
+                None,
+                weight_connection_new_b,
+                true,
+                /*from*/ node_index_new,
+                /*to*/ node_index_output,
+            );
+            trace!(
+                "Mutating by adding node {} and connections {} and {}",
+                node_index_new,
+                connection_index_new_a,
+                connection_index_new_b
+            );
         }
 
         self.is_evaluation_order_up_to_date = false;
@@ -617,25 +864,37 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
         trace!(target: "net_EXTREME", "NET: {self:#?}");
         self.verify_invariants();
     }
-    
+
     pub(crate) fn set_inputs(&mut self, inputs: &[f32]) {
         assert_eq!(inputs.len(), self.net_params.input_count);
-        for (i, node) in self.nodes.iter_mut().enumerate().take(self.net_params.input_count) {
+        for (i, node) in self
+            .nodes
+            .iter_mut()
+            .enumerate()
+            .take(self.net_params.input_count)
+        {
             assert_eq!(node.layer, Layer::Input);
             node.value = inputs[i];
         }
     }
-    
-    pub(crate) fn get_outputs(&self) -> Vec::<f32> {
+
+    pub(crate) fn get_outputs(&self) -> Vec<f32> {
         let mut v = Vec::<f32>::with_capacity(self.net_params.output_count);
-        for (i, node) in self.nodes.iter().enumerate().skip(self.net_params.input_count).take(self.net_params.output_count) {
+        for (i, node) in self
+            .nodes
+            .iter()
+            .enumerate()
+            .skip(self.net_params.input_count)
+            .take(self.net_params.output_count)
+        {
             assert_eq!(node.layer, Layer::Output);
             v.push(node.value);
         }
         v
     }
 
-    pub fn print_net_structure(&self) { // FUTURE: rewrite for being logging compatible
+    pub fn print_net_structure(&self) {
+        // FUTURE: rewrite for being logging compatible
         let mut prev = Layer::Input;
         for n in self.nodes.iter() {
             let index = n.index.1;
@@ -647,11 +906,24 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
             };
             print!("N{index}/{kind} : ");
             match n.layer {
-                Layer::Input  => if let Some(x) = self.net_params. input_names { print!("{} : ", x[index]); },
-                Layer::Output => if let Some(x) = self.net_params.output_names { print!("{} : ", x[index - self.net_params.input_count]); },
-                _ => {},
+                Layer::Input => {
+                    if let Some(x) = self.net_params.input_names {
+                        print!("{} : ", x[index]);
+                    }
+                }
+                Layer::Output => {
+                    if let Some(x) = self.net_params.output_names {
+                        print!("{} : ", x[index - self.net_params.input_count]);
+                    }
+                }
+                _ => {}
             }
-            for (i, c) in n.input_connections.iter().map(|&i| self.get_connection(i)).enumerate() {
+            for (i, c) in n
+                .input_connections
+                .iter()
+                .map(|&i| self.get_connection(i))
+                .enumerate()
+            {
                 let comma = if i == 0 { "" } else { ", " };
                 let index = c.index.1;
                 let tf = if c.is_enabled { "t" } else { "FALSE" };
@@ -660,68 +932,97 @@ impl <Fit> Net<Fit> where Fit: FitnessInfo {
                 print!("{comma}C{index}({tf}:N{from}->N{to})");
             }
             println!();
-            if prev == Layer::Input  && n.layer != Layer::Input  { println!(); }
-            if prev == Layer::Output && n.layer != Layer::Output { println!(); }
+            if prev == Layer::Input && n.layer != Layer::Input {
+                println!();
+            }
+            if prev == Layer::Output && n.layer != Layer::Output {
+                println!();
+            }
             prev = n.layer;
         }
     }
-    
-    pub(crate) fn load_from_file<F>(path_neuralnet_file: &std::path::PathBuf) -> Option<Net<F>> where F: FitnessInfo + for<'a> Deserialize<'a> {
+
+    pub(crate) fn load_from_file<F>(path_neuralnet_file: &std::path::PathBuf) -> Option<Net<F>>
+    where
+        F: FitnessInfo + for<'a> Deserialize<'a>,
+    {
         // Load as a string of JSON
         let data = std::fs::read_to_string(path_neuralnet_file).unwrap();
         // Reconstitute back into Playback object
         let mut net = serde_json::from_str::<Net<F>>(&data).unwrap();
-        
+
         // Fill-in non-saved fields: map_node_id_to_index, map_connection_id_to_index, node_order_list, and is_evaluation_order_up_to_date
-        for n in net.nodes.iter()       { net.map_node_id_to_index      .insert(n.id, n.index); }
-        for c in net.connections.iter() { net.map_connection_id_to_index.insert(c.id, c.index); }
+        for n in net.nodes.iter() {
+            net.map_node_id_to_index.insert(n.id, n.index);
+        }
+        for c in net.connections.iter() {
+            net.map_connection_id_to_index.insert(c.id, c.index);
+        }
         net.verify_invariants();
-        net.build_evaluation_order();   // computes: node_order_list, and sets is_evaluation_order_up_to_date = true
+        net.build_evaluation_order(); // computes: node_order_list, and sets is_evaluation_order_up_to_date = true
         net.verify_invariants();
 
         Some(net)
     }
-    
+
     pub(crate) fn count_excess_disjoint(&self, other: &Net<Fit>) -> (usize, usize) {
-        let id_max = self.nodes.iter().map(|node| node.id.get_ordinal()).max().unwrap();
-        let (excess_nodes, disjoint_nodes) = other.nodes.iter()
+        let id_max = self
+            .nodes
+            .iter()
+            .map(|node| node.id.get_ordinal())
+            .max()
+            .unwrap();
+        let (excess_nodes, disjoint_nodes) = other
+            .nodes
+            .iter()
             .filter(|&node| !self.map_node_id_to_index.contains_key(&node.id))
-            .fold((0,0), |acc, node| if node.id.get_ordinal() > id_max { 
+            .fold((0, 0), |acc, node| {
+                if node.id.get_ordinal() > id_max {
                     // Excess gene
-                    (acc.0 + 1, acc.1    ) 
-                } else { 
+                    (acc.0 + 1, acc.1)
+                } else {
                     //          Disjoint gene
-                    (acc.0    , acc.1 + 1)
+                    (acc.0, acc.1 + 1)
                 }
-            );
-        let id_max = self.connections.iter().map(|c| c.id.get_ordinal()).max().unwrap_or(0);
-        let (excess_cons, disjoint_cons) = other.connections.iter()
+            });
+        let id_max = self
+            .connections
+            .iter()
+            .map(|c| c.id.get_ordinal())
+            .max()
+            .unwrap_or(0);
+        let (excess_cons, disjoint_cons) = other
+            .connections
+            .iter()
             .filter(|&c| !self.map_connection_id_to_index.contains_key(&c.id))
-            .fold((0,0), |acc, c| if c.id.get_ordinal() > id_max { 
+            .fold((0, 0), |acc, c| {
+                if c.id.get_ordinal() > id_max {
                     // Excess gene
-                    (acc.0 + 1, acc.1    ) 
-                } else { 
+                    (acc.0 + 1, acc.1)
+                } else {
                     //          Disjoint gene
-                    (acc.0    , acc.1 + 1)
+                    (acc.0, acc.1 + 1)
                 }
-            );
+            });
         (excess_nodes + excess_cons, disjoint_nodes + disjoint_cons)
     }
-    
+
     pub(crate) fn sum_weights_distance_for_common_connections(&self, other: &Net<Fit>) -> f32 {
-        other.connections.iter()
-            .filter_map(|c_other| 
+        other
+            .connections
+            .iter()
+            .filter_map(|c_other| {
                 if let Some(&c_index_self) = self.map_connection_id_to_index.get(&c_other.id) {
                     let c_self = self.get_connection(c_index_self);
                     //println!("W diff = {};    w_other={} - w_self={}", c_other.weight - c_self.weight, c_other.weight, c_self.weight);
                     Some(c_other.weight - c_self.weight)
-                } else { None })
+                } else {
+                    None
+                }
+            })
             .fold(0.0, |acc, w| acc + w.abs())
     }
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -729,12 +1030,19 @@ mod tests {
 
     use super::*;
 
-
     impl FitnessInfo for f32 {
-        fn get_fitness(&self) -> f32 { *self }
-        fn set_fitness(&mut self, new: f32) { *self = new; }
-        fn get_species_weighted_fitness(&self) -> f32 { *self }
-        fn set_species_weighted_fitness(&mut self, new: f32) { *self = new; }
+        fn get_fitness(&self) -> f32 {
+            *self
+        }
+        fn set_fitness(&mut self, new: f32) {
+            *self = new;
+        }
+        fn get_species_weighted_fitness(&self) -> f32 {
+            *self
+        }
+        fn set_species_weighted_fitness(&mut self, new: f32) {
+            *self = new;
+        }
     }
 
     #[test]
@@ -759,12 +1067,20 @@ mod tests {
             prob_remove_connection: 0.0,
             prob_remove_node: 0.0,
         };
-        let mut param_add_connection = params.clone();  param_add_connection.prob_add_connection = 1.0;
-        let mut param_add_node       = params.clone();  param_add_node      .prob_add_node       = 1.0;
-        let mut param_toggle_enabled = params.clone();  param_toggle_enabled.prob_toggle_enabled = 1.0;
-        let mut param_mutate_weight  = params.clone();  param_mutate_weight .prob_mutate_weight  = 1.0;   param_mutate_weight.prob_reset_weight_when_mutating = 1.0;
-        let mut param_mutate_weight2 = params.clone();  param_mutate_weight2.prob_mutate_weight  = 1.0;   param_mutate_weight2.max_weight_change_frac = 0.1;
-        let mut param_mutate_af      = params.clone();  param_mutate_af     .prob_mutate_activation_function_of_node = 1.0;
+        let mut param_add_connection = params.clone();
+        param_add_connection.prob_add_connection = 1.0;
+        let mut param_add_node = params.clone();
+        param_add_node.prob_add_node = 1.0;
+        let mut param_toggle_enabled = params.clone();
+        param_toggle_enabled.prob_toggle_enabled = 1.0;
+        let mut param_mutate_weight = params.clone();
+        param_mutate_weight.prob_mutate_weight = 1.0;
+        param_mutate_weight.prob_reset_weight_when_mutating = 1.0;
+        let mut param_mutate_weight2 = params.clone();
+        param_mutate_weight2.prob_mutate_weight = 1.0;
+        param_mutate_weight2.max_weight_change_frac = 0.1;
+        let mut param_mutate_af = params.clone();
+        param_mutate_af.prob_mutate_activation_function_of_node = 1.0;
 
         let mut net = Net::<f32>::new(NetParams::from_size(10, 4));
         net.mutate_self(&param_add_connection, 1.0, 1.0);
@@ -807,7 +1123,6 @@ mod tests {
         info!("Mutated Net = {net:#?}");
     }
 
-
     #[test]
     fn test_remove_node() {
         for _ in 0..100 {
@@ -848,7 +1163,12 @@ mod tests {
             let nodes_b = net_b.nodes.len();
             let nodes_d = net_d.nodes.len();
             debug!("Remove NODE: Child={nodes_d} nodes; Parent A={nodes_a}; Parent B={nodes_b}");
-            debug!("Remove NODE: Child={} connections; Parent A={}; Parent B={}", net_d.connections.len(), net_a.connections.len(), net_b.connections.len());
+            debug!(
+                "Remove NODE: Child={} connections; Parent A={}; Parent B={}",
+                net_d.connections.len(),
+                net_a.connections.len(),
+                net_b.connections.len()
+            );
             assert!(nodes_d < nodes_a && nodes_d < nodes_b);
         }
     }
@@ -893,10 +1213,12 @@ mod tests {
             let connections_b = net_b.connections.len();
             let connections_c = net_c.connections.len();
             debug!("Remove CONNECTION: Child={connections_c} connections; Parent A={connections_a}; Parent B={connections_b}");
-            assert!(connections_a == 0 || (connections_c < connections_a && connections_c < connections_b));
+            assert!(
+                connections_a == 0
+                    || (connections_c < connections_a && connections_c < connections_b)
+            );
         }
     }
-
 
     #[test]
     fn test_unconnected_hidden_node() {
@@ -912,5 +1234,5 @@ mod tests {
         net_a.verify_invariants();
         net_a.build_evaluation_order();
         net_a.verify_invariants();
-    }    
+    }
 }

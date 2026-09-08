@@ -1,0 +1,39 @@
+
+# Binary formats: never line-ending-normalize.
+# git decides a file is text by looking for a NUL byte in its first 8 KB.  A
+# small, uncompressed binary with no NUL in that window (a scanned PDF is the
+# classic case) is misread as text, and its CR bytes are stripped on add.
+# Found 2026-09-07 in the KCS vault: a 7,752-byte PDF was stored 138 bytes
+# short and would not have opened from a fresh clone.
+*.pdf   binary
+*.doc   binary
+*.docx  binary
+*.xls   binary
+*.xlsx  binary
+*.ppt   binary
+*.pptx  binary
+*.odt   binary
+*.ods   binary
+*.rtf   binary
+*.zip   binary
+*.gz    binary
+*.dmg   binary
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.icns  binary
+*.wav   binary
+*.aif   binary
+*.aiff  binary
+*.mp3   binary
+*.flac  binary
+*.m4a   binary
+*.mid   binary
+*.midi  binary
+*.sib   binary
+*.mxl   binary
+*.ttf   binary
+*.otf   binary
